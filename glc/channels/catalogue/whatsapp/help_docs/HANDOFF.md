@@ -6,7 +6,7 @@
 
 This document is written so any team member can pick a story, read only their
 section, and ship a real, independently-attributable commit — without needing
-to read the rest of this file or ask Raghu what to do first.
+to read the rest of this file or ask the fork owner what to do first.
 
 **Two independent numbering systems are used below, on purpose — don't
 conflate them:** section numbers (`§0`–`§11`) number this *document's*
@@ -74,9 +74,9 @@ here instead of guessed.
 ### §0.2 Open / not yet locked — confirm before the final push
 - **Deadline conflict.** The LMS top banner reads "Due Mon, Jul 6, 2026,
   3:30 AM," but the Late Policy text and the deadlines table both say the
-  review window closes **Sun, Jul 5**. Raghu is confirming this with a TA.
+  review window closes **Sun, Jul 5**. The fork owner is confirming this with a TA.
   This doc targets finishing **well before Jul 1** regardless.
-- The exact GitHub handles of teammates beyond Raghu aren't recorded here.
+- The exact GitHub handles of teammates beyond the fork owner aren't recorded here.
   Branch names below use placeholders like `<your-github-handle>` — swap
   in your real one.
 
@@ -312,7 +312,7 @@ said `glc_v1` — confirmed against the actual fork). **Integration branch:**
 ever has one integration branch and the descriptive name reads clearer to
 anyone glancing at branch names later.
 
-### §6.1 One-time setup (Raghu)
+### §6.1 One-time setup (fork owner)
 ```bash
 git clone https://github.com/rraghu214/glc_v1_whatsapp.git
 cd glc_v1_whatsapp
@@ -372,7 +372,7 @@ git add glc/channels/catalogue/whatsapp/
 git commit -m "US-<N>: <what you did>"
 git push -u origin feature/us<N>-<short-name>
 ```
-Open a mini-PR inside Raghu's fork: base = `integration`. Reviewed and
+Open a mini-PR inside the fork: base = `integration`. Reviewed and
 merged by whoever is running `US-12` (QA) that day.
 
 **Timing differs by wave:** Wave 1 (`US-1`–`US-8`) has no predecessors, so
@@ -776,7 +776,7 @@ Detailed procedure `US-15` points to.
 4. Fill PR template fields; re-run `scorecard.py` against this exact body.
 5. Add the demo link (`US-13`).
 6. Wait for CI and CODEOWNERS review.
-7. On merge: Raghu pastes fork URL, PR URL, demo URL into the LMS.
+7. On merge: the fork owner pastes fork URL, PR URL, demo URL into the LMS.
 
 ---
 
