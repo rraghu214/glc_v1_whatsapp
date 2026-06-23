@@ -702,33 +702,81 @@ has proven stable in its Option A location and there's spare time after
 
 ---
 
+## §7.17 `help_docs/` folder organisation
+
+Each user story that produces documentation, screenshots, or helper scripts
+gets its own subfolder named `US<N>_<short_description>/`. Cross-story docs
+stay at the root.
+
+```
+help_docs/
+├── HANDOFF.md                          ← this file (master doc, root)
+├── pick_my_task.md                     ← task navigation aid (root)
+├── whatsapp_adapter_flow.mermaid       ← architecture diagram (root)
+├── US1_meta_wiring/
+│   ├── US1_meta_wiring_setup.md       ← step-by-step guide
+│   ├── scripts/
+│   │   ├── meta_webhook_test_server.py
+│   │   └── meta_waba_subscribe_and_roundtrip.py
+│   └── screenshots/
+│       └── [01–13 pngs]
+├── US2_twilio_wiring/                  ← created when US-2 is done
+│   ├── US2_twilio_wiring_setup.md
+│   └── screenshots/
+└── ...                                 ← US3–15 folders as needed
+```
+
+**Rules:**
+- All scripts use `pyproject.toml`-anchored root detection — they work
+  regardless of where they sit in the tree. Run from the repo root:
+  `uv run python glc/channels/catalogue/whatsapp/help_docs/US<N>_.../scripts/<script>.py`
+- Screenshots always go under `<story-folder>/screenshots/` — no shared
+  top-level `screenshots/` directory.
+- Nothing in `help_docs/` is production code. Scripts here are setup/dev
+  tools, committed for reproducibility, never imported by the adapter.
+
+---
+
 ## §8. Meta WhatsApp Cloud API — full test-account setup
+
+> ⚠️ **The Meta Developer UI changed significantly in 2025.** Steps 1–3 and 7 below
+> describe the old UI and are no longer accurate. The authoritative, up-to-date
+> step-by-step (reflecting the wizard-based 2026 UI, actually executed and
+> verified on 23 Jun 2026) is in:
+> `glc/channels/catalogue/whatsapp/help_docs/US1_meta_wiring/US1_meta_wiring_setup.md`
+> Use that document instead of the steps below.
 
 No business verification needed for any of this.
 
-1. **Meta for Developers → My Apps → Create App**, **Business** app type.
-2. **Add Product → WhatsApp** → **Getting Started** — provisions a free
-   test WhatsApp Business Account and test phone number automatically.
-3. **API Setup** panel → **Generate access token** (temporary, 24h).
+1. ~~**Meta for Developers → My Apps → Create App**, **Business** app type.~~
+   *Replaced by wizard: App details → Use cases (select WhatsApp) → Business Portfolio → Overview → Create app. See §8 help doc.*
+2. ~~**Add Product → WhatsApp** → **Getting Started**~~ — *There is no "Add a Product" button in the new UI. Use cases → Customize → Continue → Step 1. Try it out.*
+3. **"Step 1. Try it out"** panel (previously called "API Setup") → **Generate access token** (temporary, 24h).
 4. Pick the **From** test number, add a **To** number (your phone), send
    the pre-filled `hello_world` template to verify the basic path.
 5. Note the test phone number ID and WhatsApp Business Account ID.
 6. Reply from your phone — opens the 24-hour customer service window.
-7. **Permanent token:** **Business Settings → System Users → Add**, Admin
-   role, generate a token with `whatsapp_business_messaging` +
-   `whatsapp_business_management` permissions, expiration Never. This is
-   `WHATSAPP_TOKEN`.
+7. **60-day token (replaces System Users approach):** Go to
+   [developers.facebook.com/tools/explorer](https://developers.facebook.com/tools/explorer),
+   select your app, add `whatsapp_business_management` + `whatsapp_business_messaging`
+   permissions, click **Generate Access Token**, then exchange the short-lived token
+   for a 60-day one via the Graph API. See Step 10 in the help doc.
+   *(System Users requires a Facebook Page — it was blocked in this setup. Graph API
+   Explorer works with an unverified Business Portfolio.)*
 8. **App Secret:** **App Settings → Basic → App secret → Show.** This is
    `WHATSAPP_APP_SECRET`.
-9. **Webhook:** expose your local server with `ngrok http 8000` (or
-   `cloudflared`). **App Dashboard → WhatsApp → Configuration → Edit**,
+9. **Webhook:** expose your local server with `ngrok http 8765` (or
+   `cloudflared`). **WhatsApp → Configuration → Edit**,
    enter the Callback URL and a Verify Token, **Verify and Save**. Meta
    sends a one-time GET with `hub.mode`/`hub.verify_token`/`hub.challenge`
    — echo `hub.challenge` back as plain text with 200 once the token matches.
-10. Subscribe to the **messages** webhook field; use **Send test** to confirm.
+10. Subscribe to the **messages** webhook field by running:
+    `uv run python glc/channels/catalogue/whatsapp/help_docs/US1_meta_wiring/scripts/meta_waba_subscribe_and_roundtrip.py <your-number>`
+    (see Phase B in the help doc).
 
 **Required `.env` values:** `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TOKEN`,
-`WHATSAPP_APP_SECRET`, your chosen verify token.
+`WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_WABA_ID`, `WHATSAPP_APP_ID`.
+See `.env.example` for the full template.
 
 ---
 
