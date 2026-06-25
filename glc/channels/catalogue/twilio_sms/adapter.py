@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import os
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from glc.channels.base import ChannelAdapter
 from glc.channels.envelope import Attachment, ChannelMessage, ChannelReply
