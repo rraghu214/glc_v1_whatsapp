@@ -12,6 +12,8 @@ import hmac
 import os
 from typing import Any
 
+from twilio.request_validator import RequestValidator
+
 from glc.channels.base import ChannelAdapter
 from glc.channels.envelope import ChannelMessage, ChannelReply
 
@@ -23,6 +25,27 @@ def verify_meta_signature(raw_body: bytes, headers: dict) -> bool:
         return False
     expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, sig_header.removeprefix("sha256="))
+
+
+def verify_twilio_signature(url: str, params: dict, signature: str, auth_token: str) -> bool:
+    """Verifies the Twilio signature of an incoming webhook.
+
+    Args:
+        url: The full public webhook URL (from TWILIO_WEBHOOK_URL env var).
+        params: The form data dict from the webhook payload.
+        signature: The X-Twilio-Signature header value.
+        auth_token: The Twilio Auth Token for validation.
+
+    Returns:
+        True if the signature is valid, False otherwise.
+    """
+    if not auth_token or not signature:
+        return False
+    try:
+        validator = RequestValidator(auth_token)
+        return validator.validate(url, params, signature)
+    except Exception:
+        return False
 
 
 def parse_meta_payload(body: dict) -> dict[str, Any] | None:

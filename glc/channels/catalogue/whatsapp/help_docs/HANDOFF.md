@@ -79,6 +79,14 @@ here instead of guessed.
 - The exact GitHub handles of teammates beyond the fork owner aren't recorded here.
   Branch names below use placeholders like `<your-github-handle>` — swap
   in your real one.
+- **`twilio` not yet declared in `pyproject.toml` (pending separate PR to TSAI).**
+  `adapter.py` (US-6) and `glc/channels/catalogue/whatsapp/tests/test_twilio_path.py`
+  (US-11) both import from the `twilio` package. `pyproject.toml` is outside the
+  owned path — adding a dependency requires a **separate PR scoped only to
+  `pyproject.toml`, `@theschoolofai` review, and branch-protection bypass** (see
+  §0.1's shared-code exception). Until that PR merges, `adapter.py` will raise
+  `ModuleNotFoundError` on a clean install. Raise this PR before `US-9` branches
+  from `integration`.
 
 ### §0.3 Authorization/policy gaps — found by re-reading `glc/routes/channels.py`,
 `glc/security/rate_limits.py`, and `tests/test_audit_log.py` directly
