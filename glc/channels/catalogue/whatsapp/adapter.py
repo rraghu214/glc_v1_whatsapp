@@ -231,8 +231,9 @@ class Adapter(ChannelAdapter):
             # drop for public-channel untrusted strangers; owners and known users
             # in DM mode pass through.
             # TODO: replace this block with `return None` once channels.yaml enables
-            # the channel — the inner check must not remain after enable or
-            # user_paired senders would bypass the public mention-gate.
+            # the channel — the inner check must not remain after enable or BOTH
+            # owner_paired AND user_paired senders in public channels would bypass
+            # the mention-gate (allowed() returns False for them too when not mentioned).
             if is_public and trust == "untrusted":
                 return None
 
