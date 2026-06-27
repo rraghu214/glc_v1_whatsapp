@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+from datetime import datetime
 from typing import Any
 
 from glc.channels.base import ChannelAdapter
@@ -47,7 +48,7 @@ def parse_meta_payload(body: dict) -> dict[str, Any] | None:
     }
 
 
-def parse_twilio_payload(payload: dict) -> dict[str, Any] | None:
+def parse_twilio_payload(payload: dict, received_at: datetime) -> dict[str, Any] | None:
     """US-7: Parse Twilio Sandbox webhook payload."""
     from_id = payload.get("WaId")
     if not from_id:
@@ -59,7 +60,7 @@ def parse_twilio_payload(payload: dict) -> dict[str, Any] | None:
         "from_id": from_id,
         "text": text,
         "message_id": payload.get("MessageSid"),
-        "timestamp": None,
+        "timestamp": received_at,
         "profile_name": payload.get("ProfileName"),
     }
 
@@ -93,7 +94,7 @@ def build_meta_send_payload(reply: ChannelReply) -> dict[str, Any]:
 class Adapter(ChannelAdapter):
     name = "whatsapp"
 
-    async def on_message(self, raw: Any) -> ChannelMessage | None:
+    async def on_message(self, raw: Any) -> ChannelMessage:
         raise NotImplementedError(
             "Group assignment: implement on_message and send. "
             "See docs/ADAPTER_GUIDE.md and glc/channels/catalogue/whatsapp/README.md."
