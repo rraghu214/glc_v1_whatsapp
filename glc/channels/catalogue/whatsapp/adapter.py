@@ -1,15 +1,11 @@
-"""Stub adapter for WhatsApp (Meta Cloud API or Twilio Sandbox).
-
-Group assignment: implement on_message and send against the mock-API
-fake in tests/channels/mocks/whatsapp_mock.py. See docs/ADAPTER_GUIDE.md
-for the standard workflow.
-"""
+"""WhatsApp adapter for Twilio Sandbox and Meta Cloud API."""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
 import os
+from datetime import datetime
 from typing import Any
 
 from twilio.request_validator import RequestValidator
@@ -72,6 +68,41 @@ def parse_meta_payload(body: dict) -> dict[str, Any] | None:
         "message_id": msg["id"],
         "timestamp": msg["timestamp"],
         "profile_name": profile_name,
+    }
+
+
+def parse_twilio_payload(payload: dict, received_at: datetime) -> dict[str, Any] | None:
+    """US-7: Parse Twilio Sandbox webhook payload."""
+    from_id = payload.get("WaId")
+    if not from_id:
+        return None
+
+    text = payload.get("Body") if payload.get("NumMedia") == "0" else None
+
+    return {
+        "from_id": from_id,
+        "text": text,
+        "message_id": payload.get("MessageSid"),
+        "timestamp": received_at,
+        "profile_name": payload.get("ProfileName") or None,
+    }
+
+
+def build_twilio_send_payload(to_phone: str, bot_phone: str, text: str | None) -> dict[str, str]:
+    """US-8: Build Twilio Sandbox outbound payload."""
+    if not text:
+        raise ValueError("build_twilio_send_payload: text must be a non-empty string")
+
+    if not bot_phone.startswith("whatsapp:"):
+        bot_phone = f"whatsapp:{bot_phone}"
+
+    if not to_phone.startswith("whatsapp:"):
+        to_phone = f"whatsapp:{to_phone}"
+
+    return {
+        "To": to_phone,
+        "From": bot_phone,
+        "Body": text,
     }
 
 
