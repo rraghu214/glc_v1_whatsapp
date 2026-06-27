@@ -16,7 +16,7 @@ from glc.channels.base import ChannelAdapter
 from glc.channels.envelope import ChannelMessage, ChannelReply
 from glc.security.allowlists import allowed
 from glc.security.pairing import get_pairing_store
-from glc.security.trust_level import classify
+from glc.security.trust_level import TrustLevel, classify
 
 
 def verify_meta_signature(raw_body: bytes, headers: dict) -> bool:
@@ -138,10 +138,10 @@ def _to_channel_message(
     parsed: dict[str, Any],
     *,
     provider: str,
+    trust: TrustLevel,
 ) -> ChannelMessage:
-    trust = classify("whatsapp", parsed["from_id"])
     if provider == "meta":
-        arrived_at = datetime.fromtimestamp(int(parsed["timestamp"]), tz=UTC)
+        arrived_at = datetime.fromtimestamp(int(float(parsed["timestamp"])), tz=UTC)
     else:
         arrived_at = parsed["timestamp"]
     return ChannelMessage(
@@ -165,7 +165,6 @@ class Adapter(ChannelAdapter):
 
         headers = _headers(raw)
         is_public = bool(self.config.get("is_public_channel", False))
-        owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]
         parsed: dict[str, Any] | None = None
         provider = "meta"
 
@@ -207,6 +206,7 @@ class Adapter(ChannelAdapter):
         if parsed is None:
             return None
 
+        owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]
         trust = classify("whatsapp", parsed["from_id"])
         ok, _ = allowed(
             "whatsapp",
@@ -215,10 +215,16 @@ class Adapter(ChannelAdapter):
             is_public_channel=is_public,
             was_mentioned=False,
         )
-        if not ok and is_public and trust == "untrusted":
-            return None
+        if not ok:
+            # channels.yaml has whatsapp: enabled: false, so allowed() returns False
+            # for everyone including owners. Until that is fixed, only enforce the
+            # drop for public-channel untrusted strangers; owners and known users
+            # in DM mode pass through.
+            # TODO: simplify to `return None` once channels.yaml enables the channel.
+            if is_public and trust == "untrusted":
+                return None
 
-        return _to_channel_message(parsed, provider=provider)
+        return _to_channel_message(parsed, provider=provider, trust=trust)
 
     async def send(self, reply: ChannelReply) -> Any:
         body = build_meta_send_payload(reply)
