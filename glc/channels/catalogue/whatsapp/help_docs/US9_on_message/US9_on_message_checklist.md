@@ -34,7 +34,8 @@ raw input
     │
     ├─ verify (Shape B only) → parse → None on failure
     │
-    ├─ classify("whatsapp", from_id)
+    ├─ owner_ids lookup (deferred — only after verified parse)
+    ├─ classify("whatsapp", from_id) — once; passed to _to_channel_message
     ├─ allowed(..., owner_ids, is_public_channel, was_mentioned=False)
     ├─ drop if: not ok AND is_public AND trust == "untrusted"   (Test 6)
     │
@@ -54,10 +55,14 @@ From HANDOFF §4.2 — `on_message(raw)` accepts **two shapes**:
 
 | Signal | Provider | Verify helper | Parse helper |
 |---|---|---|---|
-| Header `X-Hub-Signature-256` | Meta | `verify_meta_signature()` (US-3) | `parse_meta_payload()` (US-4) |
-| Header `X-Twilio-Signature` | Twilio | `verify_twilio_signature()` (US-6) | `parse_twilio_payload()` (US-7) |
+| Header `x-hub-signature-256` (any case via `_headers()`) | Meta | `verify_meta_signature()` (US-3) | `parse_meta_payload()` (US-4) |
+| Header `x-twilio-signature` (any case via `_headers()`) | Twilio | `verify_twilio_signature()` (US-6) | `parse_twilio_payload()` (US-7) |
 | Dict has `"entry"` key | Meta | none (Shape A) | `parse_meta_payload()` |
 | Dict has `"From"` + `"Body"` | Twilio | none (Shape A) | `parse_twilio_payload()` — **requires `WaId`** (US-7) |
+
+**Header normalisation:** `_headers()` lowercases all keys so ASGI/Starlette webhooks
+(`x-hub-signature-256`) and test mocks (`X-Hub-Signature-256`) both work. `verify_meta_signature`
+also accepts mixed-case keys for direct callers.
 
 In production, every real webhook is Shape B. Shape A exists so the fixed suite can test
 trust classification without standing up a signing layer.
@@ -68,16 +73,16 @@ Three module-level helpers keep `on_message` readable:
 
 ```python
 def _parse_form_body(raw_body: bytes) -> dict[str, str]:
-    """Twilio Shape B: form-urlencoded bytes → flat str dict."""
+    """Twilio Shape B: form-urlencoded bytes → flat str dict; returns {} on bad UTF-8."""
 
 def _headers(raw: Any) -> dict[str, str]:
-    """Extract headers dict from Shape B input."""
+    """Extract headers from Shape B input; normalises keys to lowercase."""
 
-def _to_channel_message(parsed: dict, *, provider: str) -> ChannelMessage:
-    """Map parsed dict → ChannelMessage with trust + timestamps."""
+def _to_channel_message(parsed: dict, *, provider: str, trust: TrustLevel) -> ChannelMessage:
+    """Map parsed dict → ChannelMessage; trust passed in (single classify() call)."""
 ```
 
-### Full `on_message` implementation (reference)
+### Full `on_message` implementation (reference — post PR7 review)
 
 ```python
 async def on_message(self, raw: Any) -> ChannelMessage | None:
@@ -87,7 +92,6 @@ async def on_message(self, raw: Any) -> ChannelMessage | None:
 
     headers = _headers(raw)
     is_public = bool(self.config.get("is_public_channel", False))
-    owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]
     parsed: dict[str, Any] | None = None
     provider = "meta"
 
@@ -96,17 +100,16 @@ async def on_message(self, raw: Any) -> ChannelMessage | None:
         if not isinstance(raw_body, bytes):
             return None
 
-        if headers.get("X-Twilio-Signature"):
+        twilio_sig = headers.get("x-twilio-signature", "")
+        if twilio_sig:
             params = _parse_form_body(raw_body)
             url = os.environ.get("TWILIO_WEBHOOK_URL", "")
             auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
-            if not verify_twilio_signature(
-                url, params, headers.get("X-Twilio-Signature", ""), auth_token
-            ):
+            if not verify_twilio_signature(url, params, twilio_sig, auth_token):
                 return None
             parsed = parse_twilio_payload(params, datetime.now(UTC))
             provider = "twilio"
-        elif headers.get("X-Hub-Signature-256"):
+        elif headers.get("x-hub-signature-256"):
             if not verify_meta_signature(raw_body, headers):
                 return None
             try:
@@ -129,6 +132,7 @@ async def on_message(self, raw: Any) -> ChannelMessage | None:
     if parsed is None:
         return None
 
+    owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]
     trust = classify("whatsapp", parsed["from_id"])
     ok, _ = allowed(
         "whatsapp",
@@ -137,25 +141,34 @@ async def on_message(self, raw: Any) -> ChannelMessage | None:
         is_public_channel=is_public,
         was_mentioned=False,
     )
-    if not ok and is_public and trust == "untrusted":
-        return None
+    if not ok:
+        # channels.yaml workaround — see Design decisions below
+        if is_public and trust == "untrusted":
+            return None
 
-    return _to_channel_message(parsed, provider=provider)
+    return _to_channel_message(parsed, provider=provider, trust=trust)
 ```
 
 ### Design decisions — each one is deliberate
 
 **Shape B checks Twilio header before Meta:**
 If both headers were present (impossible in production), Twilio wins because
-`X-Twilio-Signature` is checked first. Real deployments never send both.
+`x-twilio-signature` is checked first. Real deployments never send both.
 
-**Allowlist drop is narrower than HANDOFF §7.9 step 6:**
+**Headers normalised to lowercase in `_headers()`:**
+Starlette/FastAPI lowercases header names in production. `_headers()` applies the same
+normalisation so Shape B lookups work for both ASGI webhooks and test mocks.
+
+**Allowlist outer gate with channels.yaml workaround:**
 HANDOFF says "if not allowed, return None." Strict application would break tests 1 and 2
 because `whatsapp` is `enabled: false` in `channels.yaml` — `allowed()` returns `False`
-for everyone, including owners. The implementation only drops when:
+for everyone, including owners. The implementation uses an outer `if not ok:` with a
+nested drop only when `is_public and trust == "untrusted"`:
 
 ```python
-not ok and is_public and trust == "untrusted"
+if not ok:
+    if is_public and trust == "untrusted":
+        return None
 ```
 
 This matches test expectations:
@@ -163,13 +176,28 @@ This matches test expectations:
 - Stranger in DM → deliver as `untrusted` (Test 2)
 - Stranger in public → silently drop (Test 6)
 
-**`was_mentioned=False` always:**
-Neither Meta Cloud API nor Twilio WhatsApp sandbox has a group-chat @mention concept.
+**Future note (P3-1):** When `channels.yaml` is set to `enabled: true`, replace the entire
+`if not ok:` block with plain `return None`. Do not keep the inner check — it would let
+`user_paired` senders bypass the public mention-gate.
 
-**Meta timestamp → UTC datetime; Twilio uses receive time:**
-Meta: `datetime.fromtimestamp(int(parsed["timestamp"]), tz=UTC)` from webhook epoch string.
-Twilio: `parse_twilio_payload(..., datetime.now(UTC))` stores `received_at` as the timestamp
-(US-7 design — Twilio form posts don't carry a reliable message epoch in all variants).
+**Single `classify()` call:**
+`trust` is computed once in `on_message` and passed to `_to_channel_message(..., trust=trust)`.
+
+**`owner_ids` deferred past verify+parse:**
+Pairing-store query runs only after `if parsed is None: return None` — no DB hit on
+unsigned/tampered webhooks.
+
+**Meta timestamp parsing:**
+`int(float(parsed["timestamp"]))` handles both `"1700000000"` and `"1700000000.0"`.
+
+**`parse_meta_payload` guards:**
+Return dict wrapped in `try/except (KeyError, TypeError)` when `from`/`id`/`timestamp` absent.
+
+**Twilio `NumMedia` default:**
+`payload.get("NumMedia", "0")` — text preserved when field absent.
+
+**`_parse_form_body` UTF-8 guard:**
+`UnicodeDecodeError` → `{}` → `parse_twilio_payload` → `None` cleanly.
 
 **Twilio Shape A requires `WaId`:**
 HANDOFF fallback mentions `"From"`/`"Body"`, but US-7's `parse_twilio_payload` requires
@@ -208,8 +236,8 @@ ChannelMessage(
     channel_user_id=parsed["from_id"],           # bare E.164
     user_handle=parsed["profile_name"] or parsed["from_id"],
     text=parsed["text"],                         # None for media / non-text
-    trust_level=classify(...),                   # owner_paired | user_paired | untrusted
-    arrived_at=<datetime>,
+    trust_level=trust,                           # passed from on_message (single classify)
+    arrived_at=<datetime>,                       # Meta: int(float(timestamp)); Twilio: received_at
     metadata={
         "provider": "meta" | "twilio",
         "message_id": parsed["message_id"],
@@ -370,11 +398,17 @@ asyncio.run(main())
 |---|---|
 | `raw_body` present but not `bytes` | Return `None` immediately |
 | Shape B with no signature header | Return `None` (neither Meta nor Twilio) |
+| ASGI lowercase headers (`x-hub-signature-256`) | `_headers()` normalises; lookups use lowercase keys |
+| Mixed-case headers on direct `verify_meta_signature()` call | Fallback accepts `X-Hub-Signature-256` too |
 | Meta delivery/status webhook (no `messages`) | `parse_meta_payload` → `None` → drop |
+| Meta message missing `from`/`id`/`timestamp` | `parse_meta_payload` → `None` (no KeyError) |
 | Meta non-text message (`type != "text"`) | Envelope with `text=None` |
+| Meta float-string timestamp (`"1700000000.0"`) | `int(float(...))` in `_to_channel_message` |
 | Twilio media message (`NumMedia != "0"`) | Envelope with `text=None` |
+| Twilio `NumMedia` absent | Defaults to `"0"` — `Body` text preserved |
 | Twilio `{From, Body}` without `WaId` | `parse_twilio_payload` → `None` |
 | Invalid Meta JSON in Shape B | `json.JSONDecodeError` → `None` |
+| Non-UTF-8 Twilio form body | `_parse_form_body` → `{}` → `None` |
 | `whatsapp` disabled in `channels.yaml` | Owners/strangers in DM still pass; public strangers dropped |
 | Both signature headers (theoretical) | Twilio branch wins (checked first) |
 | Missing `TWILIO_WEBHOOK_URL` / `TWILIO_AUTH_TOKEN` | Signature verify fails → `None` |
@@ -424,6 +458,22 @@ Config keys read by `on_message`:
 |---|---|---|
 | `config["mock"]` | none | Test mock; triggers `pop_disconnect()` |
 | `config["is_public_channel"]` | `False` | Allowlist public-channel drop (Test 6) |
+
+---
+
+## PR review fixes applied (Passes 1–3)
+
+| ID | Fix |
+|---|---|
+| F1–F4 | Allowlist outer gate, `int(float(timestamp))`, single `classify()`, deferred `owner_ids` |
+| N1 | `_headers()` lowercases keys; lowercase lookups in `on_message` |
+| N2 | `parse_meta_payload` try/except on required message fields |
+| N3 | `NumMedia` defaults to `"0"` |
+| N4 | `_parse_form_body` catches `UnicodeDecodeError` |
+| N5 | `twilio_sig` extracted once |
+| P3-1 | TODO comment expanded — replace entire block when channel enabled |
+| P3-2 | `verify_meta_signature` docstring + mixed-case header fallback |
+| P3-3 | This checklist updated to match current code |
 
 ---
 

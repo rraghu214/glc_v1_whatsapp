@@ -20,8 +20,13 @@ from glc.security.trust_level import TrustLevel, classify
 
 
 def verify_meta_signature(raw_body: bytes, headers: dict) -> bool:
+    """Verify Meta X-Hub-Signature-256 (HMAC-SHA256) over raw_body.
+
+    Accepts lowercase keys (ASGI-normalised via ``_headers()``) or mixed-case
+    keys for direct callers (tests, one-off scripts).
+    """
     secret = os.environ.get("WHATSAPP_APP_SECRET", "")
-    sig_header = headers.get("x-hub-signature-256", "")
+    sig_header = headers.get("x-hub-signature-256") or headers.get("X-Hub-Signature-256") or ""
     if not secret or not sig_header.startswith("sha256="):
         return False
     expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
@@ -225,7 +230,9 @@ class Adapter(ChannelAdapter):
             # for everyone including owners. Until that is fixed, only enforce the
             # drop for public-channel untrusted strangers; owners and known users
             # in DM mode pass through.
-            # TODO: simplify to `return None` once channels.yaml enables the channel.
+            # TODO: replace this block with `return None` once channels.yaml enables
+            # the channel — the inner check must not remain after enable or
+            # user_paired senders would bypass the public mention-gate.
             if is_public and trust == "untrusted":
                 return None
 
