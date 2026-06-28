@@ -541,13 +541,21 @@ manually verified against a real sandbox send (no fixed test exists).
    `"From"`/`"Body"` → Twilio).
 2. Dispatch to the matching verify+parse pair; if verification fails,
    return `None`.
-3. `trust_level.classify("whatsapp", parsed["from_id"])`.
-4. `owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]`.
-5. `is_public = self.config.get("is_public_channel", False)`;
+3. Write the resolved provider to the shared module-level cache (see US-10
+   for the cache definition):
+   `provider_cache[parsed["from_id"]] = "meta"` or `"twilio"` accordingly.
+   This write is **unconditional** — it happens on every inbound message
+   that passes signature verification, every time, no exceptions and no
+   conditional logic. Always overwrite whatever was there before. Last-seen
+   provider always wins; there is no merge or comparison logic, since a plain
+   dict write naturally replaces the old value with no trace of it remaining.
+4. `trust_level.classify("whatsapp", parsed["from_id"])`.
+5. `owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]`.
+6. `is_public = self.config.get("is_public_channel", False)`;
    `was_mentioned = False` always (neither Meta's Cloud API nor Twilio's
    WhatsApp integration has a group-chat/@mention concept).
-6. `allowlists.allowed(...)`; if not allowed, return `None`.
-7. Construct `ChannelMessage` with `metadata={"provider": "meta"}` or
+7. `allowlists.allowed(...)`; if not allowed, return `None`.
+8. Construct `ChannelMessage` with `metadata={"provider": "meta"}` or
    `{"provider": "twilio"}`.
 **Acceptance criteria:** the 5 Meta-path fixed tests (1, 2, 4, 6, 7) still
 pass; `US-11`'s Twilio-path tests pass once that suite exists.
@@ -556,7 +564,49 @@ pass; `US-11`'s Twilio-path tests pass once that suite exists.
 ### §7.10 US-10 — `send` orchestrator (dual-provider + outbound guard)
 **Branch:** `feature/us10-send` — start once `US-5`, `US-8` are merged
 **Do:**
-1. **Outbound authorization guard — do not skip:**
+1. **Provider resolution** — positioned as the very first step in `send()`,
+   before the pairing guard. Added because `ChannelReply` has no field to
+   carry provider info (`extra='forbid'` in `envelope.py`, confirmed — do
+   not add a field there or split into two Adapter subclasses).
+
+   Define these at module level, shared with `on_message`'s cache write
+   (US-9 step 3):
+   ```python
+   USE_PROVIDER_CACHE: bool = True   # set False to disable caching entirely
+
+   provider_cache: dict[str, str] = {}   # {channel_user_id: "meta" | "twilio"}
+   _PROVIDER_CACHE_MAX: int = 100
+
+   def _remember_provider(channel_user_id: str, provider: str) -> None:
+       if len(provider_cache) >= _PROVIDER_CACHE_MAX:
+           provider_cache.pop(next(iter(provider_cache)))  # FIFO: drop oldest
+       provider_cache[channel_user_id] = provider
+   ```
+
+   `send()` dispatch logic:
+   - If `USE_PROVIDER_CACHE is True` and `reply.channel_user_id` is in
+     `provider_cache`, dispatch directly via that cached provider — skip
+     straight to building that provider's payload and sending, do not
+     attempt the other provider first.
+   - Otherwise (cache disabled, or no entry for this contact — covers a
+     brand-new contact who has never messaged in, or any contact after a
+     server restart since this is an in-memory dict that is not persisted
+     to disk): **try Meta first.**
+     - Meta succeeds → done. If `USE_PROVIDER_CACHE`, call
+       `_remember_provider(reply.channel_user_id, "meta")`.
+     - Meta returns **specifically error code 131030**
+       (`"Recipient phone number not in allowed list"`) — check the `code`
+       field exactly, not the message string, since wording can vary — then
+       **retry via Twilio**. If that succeeds and `USE_PROVIDER_CACHE`, call
+       `_remember_provider(reply.channel_user_id, "twilio")`.
+     - **Any other error must propagate as-is and must not trigger a Twilio
+       retry.** This specifically includes: 429 rate limit (already-required
+       behaviour — do not change), auth/token errors, error 131047 (24-hour
+       re-engagement window), and any timeout or 5xx/network error. Retrying
+       on an ambiguous failure risks a real double-send if the original
+       attempt actually succeeded and only the response read failed.
+
+2. **Outbound authorization guard — do not skip:**
    ```python
    rec = get_pairing_store().lookup("whatsapp", reply.channel_user_id)
    if rec is None:
@@ -568,13 +618,22 @@ pass; `US-11`'s Twilio-path tests pass once that suite exists.
    a prompt injection) into targeting the wrong number.
    **Team decision needed:** restrict to `owner_paired` only, or allow any
    paired contact? Document the choice in `US-14`.
-2. Read `reply.metadata.get("provider", "meta")`; dispatch to
-   `build_meta_send_payload`/Graph API or `build_twilio_send_payload`/
-   Twilio's `Messages.json`, accordingly.
-3. Propagate 429s as-is, for either provider — don't raise, don't swallow.
-4. *(Recommended)* `audit.append(..., event_type="outbound_reply", ...)`
+3. Dispatch to `build_meta_send_payload`/Graph API or
+   `build_twilio_send_payload`/Twilio's `Messages.json` based on the
+   provider resolved in step 1.
+4. Propagate 429s as-is, for either provider — don't raise, don't swallow.
+5. *(Recommended)* `audit.append(..., event_type="outbound_reply", ...)`
    after a successful dispatch — see §0.3 for why the gateway doesn't do
    this for you.
+
+**README note for US-14:** with the cache active, a contact registered on
+both Meta and Twilio receives replies via whichever provider they most
+recently messaged from, since `on_message` (US-9 step 3) overwrites the
+cache entry on every verified inbound message. The Meta-first-with-131030-
+fallback path only applies when there is no cache entry to consult — true
+for a brand-new contact who has never messaged in, or for any contact
+immediately after a server restart.
+
 **Acceptance criteria:** `test_send_emits_valid_wire_payload` and
 `test_rate_limit_propagates_429` still pass with the guard added —
 confirmed safe, both use the `pair_owner` fixture which registers
