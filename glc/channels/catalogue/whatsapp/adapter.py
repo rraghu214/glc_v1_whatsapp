@@ -152,10 +152,25 @@ def _parse_form_body(raw_body: bytes) -> dict[str, str]:
     return {k: v[0] if v else "" for k, v in parsed.items()}
 
 
+def _stringify_header_part(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("latin-1")
+    return str(value)
+
+
 def _headers(raw: Any) -> dict[str, str]:
     if isinstance(raw, dict):
         headers = raw.get("headers") or {}
-        return {str(k).lower(): str(v) for k, v in headers.items()}
+        if isinstance(headers, dict):
+            return {
+                _stringify_header_part(k).lower(): _stringify_header_part(v)
+                for k, v in headers.items()
+            }
+        if isinstance(headers, list):
+            return {
+                _stringify_header_part(k).lower(): _stringify_header_part(v)
+                for k, v in headers
+            }
     return {}
 
 
@@ -180,10 +195,38 @@ def _to_channel_message(
     )
 
 
+def _is_meta_131030(result: dict) -> bool:
+    err = result.get("error")
+    return isinstance(err, dict) and str(err.get("code")) == "131030"
+
+
+def _error_result(provider: str, status: int, code: str, message: str) -> dict[str, Any]:
+    return {
+        "error": {
+            "provider": provider,
+            "code": code,
+            "message": message,
+        },
+        "status": status,
+    }
+
+
+def _twilio_from_or_error() -> str | dict[str, Any]:
+    bot_phone = (os.environ.get("TWILIO_WHATSAPP_FROM") or "").strip()
+    if bot_phone:
+        return bot_phone
+    return _error_result(
+        "twilio",
+        500,
+        "missing_twilio_whatsapp_from",
+        "TWILIO_WHATSAPP_FROM is not set",
+    )
+
+
 async def _send_meta(payload: dict[str, Any]) -> dict[str, Any]:
     phone_number_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
     token = os.environ.get("WHATSAPP_TOKEN", "")
-    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+    url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             url,
@@ -193,7 +236,10 @@ async def _send_meta(payload: dict[str, Any]) -> dict[str, Any]:
                 "Content-Type": "application/json",
             },
         )
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError:
+        return _error_result("meta", resp.status_code, "non_json_response", "non-JSON response")
 
 
 async def _send_twilio(payload: dict[str, str]) -> dict[str, Any]:
@@ -207,7 +253,10 @@ async def _send_twilio(payload: dict[str, str]) -> dict[str, Any]:
             data=payload,
             headers={"Authorization": f"Basic {credentials}"},
         )
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError:
+        return _error_result("twilio", resp.status_code, "non_json_response", "non-JSON response")
 
 
 class Adapter(ChannelAdapter):
@@ -260,9 +309,6 @@ class Adapter(ChannelAdapter):
         if parsed is None:
             return None
 
-        if USE_PROVIDER_CACHE:
-            _remember_provider(parsed["from_id"], provider)
-
         owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]
         trust = classify("whatsapp", parsed["from_id"])
         ok, _ = allowed(
@@ -284,6 +330,9 @@ class Adapter(ChannelAdapter):
             if is_public and trust == "untrusted":
                 return None
 
+        if USE_PROVIDER_CACHE:
+            _remember_provider(parsed["from_id"], provider)
+
         return _to_channel_message(parsed, provider=provider, trust=trust)
 
     async def send(self, reply: ChannelReply) -> Any:
@@ -304,7 +353,9 @@ class Adapter(ChannelAdapter):
             return await _send_meta(payload)
 
         if provider == "twilio":
-            bot_phone = os.environ.get("TWILIO_WHATSAPP_FROM", "")
+            bot_phone = _twilio_from_or_error()
+            if isinstance(bot_phone, dict):
+                return bot_phone
             payload = build_twilio_send_payload(reply.channel_user_id, bot_phone, reply.text)
             if mock is not None:
                 return await mock.send(payload)
@@ -313,18 +364,31 @@ class Adapter(ChannelAdapter):
         meta_payload = build_meta_send_payload(reply)
         if mock is not None:
             result = await mock.send(meta_payload)
-            if USE_PROVIDER_CACHE:
+            if _is_meta_131030(result):
+                bot_phone = _twilio_from_or_error()
+                if isinstance(bot_phone, dict):
+                    return bot_phone
+                twilio_payload = build_twilio_send_payload(
+                    reply.channel_user_id, bot_phone, reply.text
+                )
+                twilio_result = await mock.send(twilio_payload)
+                if USE_PROVIDER_CACHE and "error" not in twilio_result:
+                    _remember_provider(reply.channel_user_id, "twilio")
+                return twilio_result
+            if USE_PROVIDER_CACHE and "error" not in result:
                 _remember_provider(reply.channel_user_id, "meta")
             return result
 
         meta_result = await _send_meta(meta_payload)
-        if meta_result.get("error", {}).get("code") == 131030:
-            bot_phone = os.environ.get("TWILIO_WHATSAPP_FROM", "")
+        if _is_meta_131030(meta_result):
+            bot_phone = _twilio_from_or_error()
+            if isinstance(bot_phone, dict):
+                return bot_phone
             twilio_payload = build_twilio_send_payload(
                 reply.channel_user_id, bot_phone, reply.text
             )
             twilio_result = await _send_twilio(twilio_payload)
-            if USE_PROVIDER_CACHE:
+            if USE_PROVIDER_CACHE and "error" not in twilio_result:
                 _remember_provider(reply.channel_user_id, "twilio")
             return twilio_result
 
