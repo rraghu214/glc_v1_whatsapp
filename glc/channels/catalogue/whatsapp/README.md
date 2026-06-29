@@ -35,6 +35,8 @@ Both are accessible for testing and both are free to start. The main practical d
 
 ## Prerequisites
 
+Enable the WhatsApp channel in `glc/channels.yaml` by setting `whatsapp: {enabled: true}`. By default it ships as disabled.
+
 Create a `.env` file at the project root (it is already gitignored). Fill in the variables for the provider(s) you are setting up.
 
 Below are the different variables used as part of this setup. You will understand how to fill in each of these as you go through the setup instructions — the table is just to give you an overview of what is required upfront.
@@ -124,7 +126,7 @@ From this panel, collect:
 - **WhatsApp Business Account ID** → copy to `WHATSAPP_WABA_ID`
 - Click **Generate new token** → copy to `WHATSAPP_TOKEN` (this token expires in 24 hours)
 
-> **60-day token (optional):** The default 24-hour token must be regenerated frequently. To get a 60-day token, use the [Graph API Explorer](https://developers.facebook.com/tools/explorer/) as described in Step 8 below.
+> **60-day token (optional):** The default 24-hour token must be regenerated frequently. To get a 60-day token, use the [Graph API Explorer](https://developers.facebook.com/tools/explorer/) as described in Step 9 below.
 
 **Send the template message first:** Before the gateway can exchange free-form messages with your phone, Meta requires an initial outbound message from the business number. Use the "Send message" panel to send the pre-approved template to your personal phone number. Then **reply from your phone** — this opens the 24-hour free-form messaging window.
 
