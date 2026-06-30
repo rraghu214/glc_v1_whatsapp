@@ -60,8 +60,14 @@ jobs:
         run: |
           set -e
           for ch in ${{ steps.changed.outputs.channels }}; do
-            echo "==> tests/channels/test_${ch}.py"
-            uv run pytest "tests/channels/test_${ch}.py" -v
+            if [ -f "tests/channels/test_${ch}.py" ]; then
+              echo "==> tests/channels/test_${ch}.py"
+              uv run pytest "tests/channels/test_${ch}.py" -v
+            fi
+            if [ -d "glc/channels/catalogue/${ch}/tests" ]; then
+              echo "==> glc/channels/catalogue/${ch}/tests"
+              uv run pytest "glc/channels/catalogue/${ch}/tests" -v
+            fi
           done
       - name: Test changed STT providers
         if: steps.changed.outputs.stt != ''

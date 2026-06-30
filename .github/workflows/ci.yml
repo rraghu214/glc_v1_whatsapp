@@ -40,7 +40,7 @@ jobs:
           # adapter-pr.yml runs the matching slot test when its dir changes;
           # here we cover the cross-cutting code (envelope, policy, audit,
           # security, voice dispatchers, control plane, registry, V9 compat).
-          uv run pytest tests/ \
+          uv run pytest tests/ glc/ \
             -m "not requires_live_api and not requires_models" \
             --ignore=tests/channels \
             --ignore=tests/voice/stt \
