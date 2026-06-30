@@ -16,6 +16,11 @@ from glc.channels.catalogue.whatsapp.adapter import (
     provider_cache,
     verify_twilio_signature,
 )
+from glc.channels.catalogue.whatsapp.schemas import (
+    MetaSendPayload,
+    MetaSendText,
+    TwilioSendPayload,
+)
 from glc.channels.envelope import ChannelReply
 from glc.security.pairing import get_pairing_store
 from tests.channels.mocks.whatsapp_mock import OWNER_ID, STRANGER_ID, WhatsappMock
@@ -153,7 +158,7 @@ async def test_send_meta_returns_structured_error_for_non_json_response(monkeypa
         lambda: _FakeAsyncClient(_FakeResponse(502)),
     )
 
-    result = await _send_meta({"to": OWNER_ID})
+    result = await _send_meta(MetaSendPayload(to=OWNER_ID, text=MetaSendText(body="test")))
 
     assert result == {
         "error": {
@@ -172,7 +177,7 @@ async def test_send_twilio_returns_structured_error_for_non_json_response(monkey
         lambda: _FakeAsyncClient(_FakeResponse(503)),
     )
 
-    result = await _send_twilio({"To": "whatsapp:+1", "From": "whatsapp:+2", "Body": "hi"})
+    result = await _send_twilio(TwilioSendPayload(To="whatsapp:+1", From="whatsapp:+2", Body="hi"))
 
     assert result == {
         "error": {
@@ -234,7 +239,7 @@ async def test_send_falls_back_to_twilio_on_meta_131030_and_caches_provider(monk
     monkeypatch.setenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
 
     async def fake_send_meta(payload):
-        assert payload["to"] == OWNER_ID
+        assert payload.to == OWNER_ID
         return {
             "error": {
                 "code": 131030,
@@ -243,7 +248,7 @@ async def test_send_falls_back_to_twilio_on_meta_131030_and_caches_provider(monk
         }
 
     async def fake_send_twilio(payload):
-        assert payload == {
+        assert payload.model_dump() == {
             "To": f"whatsapp:{OWNER_ID}",
             "From": "whatsapp:+14155238886",
             "Body": "fallback",
