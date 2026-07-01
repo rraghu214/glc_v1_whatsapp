@@ -1,6 +1,19 @@
+"""Twilio path tests — Phase 1 (helper unit tests) and Phase 2 (orchestrators).
+
+Phase 1:
+    US-6: verify_twilio_signature  (HMAC-SHA1, X-Twilio-Signature)
+    US-7: parse_twilio_payload     (form-urlencoded inbound fields)
+    US-8: build_twilio_send_payload (outbound form body)
+
+Phase 2:
+    US-9/10: on_message + send orchestrators (dual-provider, provider cache,
+             Meta-131030 fallback to Twilio, outbound guard)
+"""
+
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from unittest.mock import patch
 from urllib.parse import urlencode
 
@@ -60,46 +73,103 @@ def _isolated_glc_state(monkeypatch, tmp_path):
     yield
 
 
+# US-7/8 helpers — available once those branches are merged; tests skip otherwise.
+try:
+    from glc.channels.catalogue.whatsapp.adapter import (
+        build_twilio_send_payload,
+        parse_twilio_payload,
+    )
+    _us7_available = True
+    _us8_available = True
+except ImportError:
+    parse_twilio_payload = None  # type: ignore[assignment]
+    build_twilio_send_payload = None  # type: ignore[assignment]
+    _us7_available = False
+    _us8_available = False
+
+needs_us7 = pytest.mark.skipif(not _us7_available, reason="parse_twilio_payload not yet merged (US-7)")
+needs_us8 = pytest.mark.skipif(not _us8_available, reason="build_twilio_send_payload not yet merged (US-8)")
+
+# ---------------------------------------------------------------------------
+# Shared constants
+# ---------------------------------------------------------------------------
+
+WEBHOOK_URL = "https://example.ngrok.io/whatsapp/inbound"
+AUTH_TOKEN = "test_auth_token_abc123"
+
+# Confirmed Twilio inbound field set (HANDOFF §0.1, §7.7)
+SAMPLE_PAYLOAD: dict = {
+    "MessageSid": "SM1234567890abcdef1234567890abcdef",
+    "AccountSid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "From": "whatsapp:+14155238886",
+    "To": "whatsapp:+14155551234",
+    "Body": "Hello from Twilio sandbox",
+    "NumMedia": "0",
+    "ProfileName": "Test User",
+    "WaId": "14155238886",
+    "ApiVersion": "2010-04-01",
+}
+
+RECEIVED_AT = datetime(2026, 6, 27, 10, 0, 0, tzinfo=timezone.utc)
+
+BOT_PHONE = "+14155551234"
+RECIPIENT_PHONE = "14155238886"
+
+
+def _make_signature(url: str, params: dict, token: str) -> str:
+    return RequestValidator(token).compute_signature(url, params)
+
+
+# ---------------------------------------------------------------------------
+# US-6: verify_twilio_signature
+# ---------------------------------------------------------------------------
+
+
 def test_verify_twilio_signature_valid():
-    url = "https://example.com/webhook"
-    params = {"Body": "hello", "From": "whatsapp:+123456789"}
-    auth_token = "test_auth_token"
-
-    # Compute valid signature using Twilio's RequestValidator
-    validator = RequestValidator(auth_token)
-    signature = validator.compute_signature(url, params)
-
-    assert verify_twilio_signature(url, params, signature, auth_token) is True
+    sig = _make_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, AUTH_TOKEN)
+    assert verify_twilio_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, sig, AUTH_TOKEN) is True
 
 
-def test_verify_twilio_signature_invalid():
-    url = "https://example.com/webhook"
-    params = {"Body": "hello", "From": "whatsapp:+123456789"}
-    auth_token = "test_auth_token"
-
-    assert verify_twilio_signature(url, params, "wrong_signature", auth_token) is False
+def test_verify_twilio_signature_wrong_signature():
+    assert verify_twilio_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, "wrong_sig", AUTH_TOKEN) is False
 
 
-def test_verify_twilio_signature_missing_credentials():
-    url = "https://example.com/webhook"
-    params = {"Body": "hello"}
-
-    assert verify_twilio_signature(url, params, "sig", "") is False
-    assert verify_twilio_signature(url, params, "", "token") is False
-    assert verify_twilio_signature(url, params, "sig", None) is False
-    assert verify_twilio_signature(url, params, None, "token") is False
+def test_verify_twilio_signature_tampered_params():
+    """Valid sig computed for original params must not pass after params are changed."""
+    sig = _make_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, AUTH_TOKEN)
+    tampered = {**SAMPLE_PAYLOAD, "Body": "injected content"}
+    assert verify_twilio_signature(WEBHOOK_URL, tampered, sig, AUTH_TOKEN) is False
 
 
-def test_verify_twilio_signature_exception_handled():
-    url = "https://example.com/webhook"
-    params = {"Body": "hello"}
-    auth_token = "test_auth_token"
+def test_verify_twilio_signature_wrong_url():
+    """Sig is tied to the exact URL — a different URL must not validate."""
+    sig = _make_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, AUTH_TOKEN)
+    assert verify_twilio_signature("https://attacker.example.com/hook", SAMPLE_PAYLOAD, sig, AUTH_TOKEN) is False
 
-    with patch("glc.channels.catalogue.whatsapp.adapter.RequestValidator") as mock_validator:
-        # Mock RequestValidator to raise an exception on validation
-        mock_validator.return_value.validate.side_effect = Exception("Validation failed")
 
-        assert verify_twilio_signature(url, params, "sig", auth_token) is False
+def test_verify_twilio_signature_empty_auth_token():
+    sig = _make_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, AUTH_TOKEN)
+    assert verify_twilio_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, sig, "") is False
+
+
+def test_verify_twilio_signature_empty_signature():
+    assert verify_twilio_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, "", AUTH_TOKEN) is False
+
+
+def test_verify_twilio_signature_none_credentials():
+    assert verify_twilio_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, "sig", None) is False
+    assert verify_twilio_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, None, AUTH_TOKEN) is False
+
+
+def test_verify_twilio_signature_exception_returns_false():
+    with patch("glc.channels.catalogue.whatsapp.adapter.RequestValidator") as mock_cls:
+        mock_cls.return_value.validate.side_effect = Exception("SDK error")
+        assert verify_twilio_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, "sig", AUTH_TOKEN) is False
+
+
+# ---------------------------------------------------------------------------
+# Integration helpers (_headers, _is_meta_131030, _send_meta, _send_twilio)
+# ---------------------------------------------------------------------------
 
 
 def test_headers_accept_asgi_header_tuples():
@@ -187,6 +257,116 @@ async def test_send_twilio_returns_structured_error_for_non_json_response(monkey
         },
         "status": 503,
     }
+
+
+# ---------------------------------------------------------------------------
+# US-7: parse_twilio_payload
+# ---------------------------------------------------------------------------
+
+
+@needs_us7
+def test_parse_twilio_payload_text_message():
+    result = parse_twilio_payload(SAMPLE_PAYLOAD, RECEIVED_AT)
+    assert result is not None
+    assert result.from_id == "14155238886"
+    assert result.text == "Hello from Twilio sandbox"
+    assert result.message_id == "SM1234567890abcdef1234567890abcdef"
+    assert result.profile_name == "Test User"
+    assert result.timestamp == RECEIVED_AT
+
+
+@needs_us7
+def test_parse_twilio_payload_timestamp_is_received_at():
+    """Twilio sends no timestamp field — adapter must use the server receipt time."""
+    t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t2 = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    r1 = parse_twilio_payload(SAMPLE_PAYLOAD, t1)
+    r2 = parse_twilio_payload(SAMPLE_PAYLOAD, t2)
+    assert r1.timestamp == t1
+    assert r2.timestamp == t2
+
+
+@needs_us7
+def test_parse_twilio_payload_media_message_text_is_none():
+    """NumMedia != '0' means a media-only message — text must be None, not raise."""
+    media_payload = {**SAMPLE_PAYLOAD, "NumMedia": "1", "Body": ""}
+    result = parse_twilio_payload(media_payload, RECEIVED_AT)
+    assert result is not None
+    assert result.text is None
+    assert result.from_id == "14155238886"
+
+
+@needs_us7
+def test_parse_twilio_payload_missing_waid_returns_none():
+    """WaId is required — missing means the payload cannot be identified."""
+    payload = {k: v for k, v in SAMPLE_PAYLOAD.items() if k != "WaId"}
+    assert parse_twilio_payload(payload, RECEIVED_AT) is None
+
+
+@needs_us7
+def test_parse_twilio_payload_no_profile_name():
+    """ProfileName is optional — absent must yield profile_name=None, not KeyError."""
+    payload = {k: v for k, v in SAMPLE_PAYLOAD.items() if k != "ProfileName"}
+    result = parse_twilio_payload(payload, RECEIVED_AT)
+    assert result is not None
+    assert result.profile_name is None
+
+
+@needs_us7
+def test_parse_twilio_payload_waid_is_bare_number():
+    """WaId carries a bare E.164 number (no 'whatsapp:' prefix)."""
+    result = parse_twilio_payload(SAMPLE_PAYLOAD, RECEIVED_AT)
+    assert result is not None
+    assert not result.from_id.startswith("whatsapp:")
+
+
+# ---------------------------------------------------------------------------
+# US-8: build_twilio_send_payload
+# ---------------------------------------------------------------------------
+
+
+@needs_us8
+def test_build_twilio_send_payload_shape():
+    """Outbound payload must have To, From, Body with correct values."""
+    payload = build_twilio_send_payload(RECIPIENT_PHONE, BOT_PHONE, "Hello back")
+    assert payload.Body == "Hello back"
+    assert payload.To
+    assert payload.From
+
+
+@needs_us8
+def test_build_twilio_send_payload_adds_whatsapp_prefix_to_both():
+    """Bare numbers must be prefixed with 'whatsapp:' before sending."""
+    payload = build_twilio_send_payload("14155238886", "+14155551234", "hi")
+    assert payload.To.startswith("whatsapp:")
+    assert payload.From.startswith("whatsapp:")
+
+
+@needs_us8
+def test_build_twilio_send_payload_does_not_double_prefix():
+    """Numbers that already carry 'whatsapp:' prefix must not get it twice."""
+    payload = build_twilio_send_payload(
+        "whatsapp:+14155238886", "whatsapp:+14155551234", "hi"
+    )
+    assert payload.To.count("whatsapp:") == 1
+    assert payload.From.count("whatsapp:") == 1
+
+
+@needs_us8
+def test_build_twilio_send_payload_none_text_raises():
+    with pytest.raises(ValueError):
+        build_twilio_send_payload(RECIPIENT_PHONE, BOT_PHONE, None)
+
+
+@needs_us8
+def test_build_twilio_send_payload_empty_text_raises():
+    with pytest.raises(ValueError):
+        build_twilio_send_payload(RECIPIENT_PHONE, BOT_PHONE, "")
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: on_message + send orchestrators
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
