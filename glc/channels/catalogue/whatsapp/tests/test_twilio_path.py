@@ -26,6 +26,8 @@ from glc.channels.catalogue.whatsapp.adapter import (
     _is_meta_131030,
     _send_meta,
     _send_twilio,
+    build_twilio_send_payload,
+    parse_twilio_payload,
     provider_cache,
     verify_twilio_signature,
 )
@@ -72,23 +74,6 @@ def _isolated_glc_state(monkeypatch, tmp_path):
     _a._singleton = None
     yield
 
-
-# US-7/8 helpers — available once those branches are merged; tests skip otherwise.
-try:
-    from glc.channels.catalogue.whatsapp.adapter import (
-        build_twilio_send_payload,
-        parse_twilio_payload,
-    )
-    _us7_available = True
-    _us8_available = True
-except ImportError:
-    parse_twilio_payload = None  # type: ignore[assignment]
-    build_twilio_send_payload = None  # type: ignore[assignment]
-    _us7_available = False
-    _us8_available = False
-
-needs_us7 = pytest.mark.skipif(not _us7_available, reason="parse_twilio_payload not yet merged (US-7)")
-needs_us8 = pytest.mark.skipif(not _us8_available, reason="build_twilio_send_payload not yet merged (US-8)")
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -264,7 +249,6 @@ async def test_send_twilio_returns_structured_error_for_non_json_response(monkey
 # ---------------------------------------------------------------------------
 
 
-@needs_us7
 def test_parse_twilio_payload_text_message():
     result = parse_twilio_payload(SAMPLE_PAYLOAD, RECEIVED_AT)
     assert result is not None
@@ -275,7 +259,6 @@ def test_parse_twilio_payload_text_message():
     assert result.timestamp == RECEIVED_AT
 
 
-@needs_us7
 def test_parse_twilio_payload_timestamp_is_received_at():
     """Twilio sends no timestamp field — adapter must use the server receipt time."""
     t1 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -286,7 +269,6 @@ def test_parse_twilio_payload_timestamp_is_received_at():
     assert r2.timestamp == t2
 
 
-@needs_us7
 def test_parse_twilio_payload_media_message_text_is_none():
     """NumMedia != '0' means a media-only message — text must be None, not raise."""
     media_payload = {**SAMPLE_PAYLOAD, "NumMedia": "1", "Body": ""}
@@ -296,14 +278,12 @@ def test_parse_twilio_payload_media_message_text_is_none():
     assert result.from_id == "14155238886"
 
 
-@needs_us7
 def test_parse_twilio_payload_missing_waid_returns_none():
     """WaId is required — missing means the payload cannot be identified."""
     payload = {k: v for k, v in SAMPLE_PAYLOAD.items() if k != "WaId"}
     assert parse_twilio_payload(payload, RECEIVED_AT) is None
 
 
-@needs_us7
 def test_parse_twilio_payload_no_profile_name():
     """ProfileName is optional — absent must yield profile_name=None, not KeyError."""
     payload = {k: v for k, v in SAMPLE_PAYLOAD.items() if k != "ProfileName"}
@@ -312,7 +292,6 @@ def test_parse_twilio_payload_no_profile_name():
     assert result.profile_name is None
 
 
-@needs_us7
 def test_parse_twilio_payload_waid_is_bare_number():
     """WaId carries a bare E.164 number (no 'whatsapp:' prefix)."""
     result = parse_twilio_payload(SAMPLE_PAYLOAD, RECEIVED_AT)
@@ -325,16 +304,14 @@ def test_parse_twilio_payload_waid_is_bare_number():
 # ---------------------------------------------------------------------------
 
 
-@needs_us8
 def test_build_twilio_send_payload_shape():
     """Outbound payload must have To, From, Body with correct values."""
     payload = build_twilio_send_payload(RECIPIENT_PHONE, BOT_PHONE, "Hello back")
     assert payload.Body == "Hello back"
-    assert payload.To
-    assert payload.From
+    assert payload.To == f"whatsapp:{RECIPIENT_PHONE}"
+    assert payload.From == f"whatsapp:{BOT_PHONE}"
 
 
-@needs_us8
 def test_build_twilio_send_payload_adds_whatsapp_prefix_to_both():
     """Bare numbers must be prefixed with 'whatsapp:' before sending."""
     payload = build_twilio_send_payload("14155238886", "+14155551234", "hi")
@@ -342,7 +319,6 @@ def test_build_twilio_send_payload_adds_whatsapp_prefix_to_both():
     assert payload.From.startswith("whatsapp:")
 
 
-@needs_us8
 def test_build_twilio_send_payload_does_not_double_prefix():
     """Numbers that already carry 'whatsapp:' prefix must not get it twice."""
     payload = build_twilio_send_payload(
@@ -352,13 +328,11 @@ def test_build_twilio_send_payload_does_not_double_prefix():
     assert payload.From.count("whatsapp:") == 1
 
 
-@needs_us8
 def test_build_twilio_send_payload_none_text_raises():
     with pytest.raises(ValueError):
         build_twilio_send_payload(RECIPIENT_PHONE, BOT_PHONE, None)
 
 
-@needs_us8
 def test_build_twilio_send_payload_empty_text_raises():
     with pytest.raises(ValueError):
         build_twilio_send_payload(RECIPIENT_PHONE, BOT_PHONE, "")
@@ -433,9 +407,37 @@ async def test_twilio_inbound_stranger_is_untrusted(monkeypatch):
     msg = await adapter.on_message(
         {"raw_body": raw_body, "headers": {"X-Twilio-Signature": signature}}
     )
+    # TEMPORARY: stranger passes through in DM mode only because channels.yaml has
+    # whatsapp disabled (adapter.py TODO ~line 324). When that TODO is resolved,
+    # on_message will return None here — change this to `assert msg is None`.
     assert msg is not None
     assert msg.channel_user_id == STRANGER_ID
     assert msg.trust_level == "untrusted"
+
+
+@pytest.mark.asyncio
+async def test_twilio_tampered_signature_is_rejected(monkeypatch):
+    """Tampered X-Twilio-Signature → on_message must return None (HANDOFF §7.11 Phase 2)."""
+    url = "https://example.com/twilio-webhook"
+    auth_token = "test_auth_token"
+    monkeypatch.setenv("TWILIO_WEBHOOK_URL", url)
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", auth_token)
+
+    raw_body = urlencode(SAMPLE_PAYLOAD).encode()
+    adapter = Adapter(config={"mock": WhatsappMock()})
+
+    # Wrong signature → rejected
+    result = await adapter.on_message(
+        {"raw_body": raw_body, "headers": {"X-Twilio-Signature": "tampered_sig"}}
+    )
+    assert result is None
+
+    # Valid signature → accepted (proves the guard is selective, not always-reject)
+    valid_sig = _make_signature(url, SAMPLE_PAYLOAD, auth_token)
+    result2 = await adapter.on_message(
+        {"raw_body": raw_body, "headers": {"X-Twilio-Signature": valid_sig}}
+    )
+    assert result2 is not None
 
 
 @pytest.mark.asyncio
