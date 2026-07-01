@@ -1,4 +1,14 @@
-"""WebSocket client for routing WhatsApp envelopes through the gateway."""
+"""WebSocket client for routing WhatsApp envelopes through the gateway.
+
+PARKED (backlog B2, see help_docs/HANDOFF.md §7.16): not wired to any
+caller. help_docs/INBOUND_WEBHOOK_ARCHITECTURE.md's Approach 2 (US-13,
+demo_webhook_server.py) calls the adapter directly and bypasses the
+gateway; only Approach 3 (POST /v1/channels/{name}/webhook in
+glc/routes/channels.py, shared code, separate maintainer PR, out of
+scope for US-1 through US-15) would route through the gateway, and that
+doc explicitly says B2's scope needs revision in light of Approach 3.
+Kept here as groundwork in case Approach 3 lands; do not treat as demoable.
+"""
 
 from __future__ import annotations
 

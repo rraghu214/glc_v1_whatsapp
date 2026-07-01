@@ -35,8 +35,8 @@ packages = ["glc"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tests", "glc"]
+asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests"]
 markers = [
     "requires_live_api: tests that need real provider credentials (skipped in CI)",
     "requires_models: tests that need local model downloads (Kokoro / whisper.cpp)",
