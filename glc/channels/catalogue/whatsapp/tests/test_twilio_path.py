@@ -13,7 +13,7 @@ Phase 2:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 from urllib.parse import urlencode
 
@@ -110,7 +110,7 @@ SAMPLE_PAYLOAD: dict = {
     "ApiVersion": "2010-04-01",
 }
 
-RECEIVED_AT = datetime(2026, 6, 27, 10, 0, 0, tzinfo=timezone.utc)
+RECEIVED_AT = datetime(2026, 6, 27, 10, 0, 0, tzinfo=UTC)
 
 BOT_PHONE = "+14155551234"
 RECIPIENT_PHONE = "14155238886"
@@ -278,8 +278,8 @@ def test_parse_twilio_payload_text_message():
 @needs_us7
 def test_parse_twilio_payload_timestamp_is_received_at():
     """Twilio sends no timestamp field — adapter must use the server receipt time."""
-    t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    t2 = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 1, tzinfo=UTC)
+    t2 = datetime(2026, 7, 1, tzinfo=UTC)
     r1 = parse_twilio_payload(SAMPLE_PAYLOAD, t1)
     r2 = parse_twilio_payload(SAMPLE_PAYLOAD, t2)
     assert r1.timestamp == t1
@@ -408,6 +408,34 @@ async def test_twilio_inbound_populates_cache_and_send_uses_twilio(monkeypatch):
         "From": "whatsapp:+14155238886",
         "Body": "reply via twilio",
     }
+
+
+@pytest.mark.asyncio
+async def test_twilio_inbound_stranger_is_untrusted(monkeypatch):
+    """Twilio inbound from an unknown number → trust_level == 'untrusted'."""
+    url = "https://example.com/twilio-webhook"
+    auth_token = "test_auth_token"
+    monkeypatch.setenv("TWILIO_WEBHOOK_URL", url)
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", auth_token)
+
+    params = {
+        "From": "whatsapp:+917777770000",
+        "Body": "hi from stranger",
+        "WaId": STRANGER_ID,
+        "ProfileName": "Stranger",
+        "MessageSid": "SMstranger",
+        "NumMedia": "0",
+    }
+    signature = RequestValidator(auth_token).compute_signature(url, params)
+    raw_body = urlencode(params).encode()
+
+    adapter = Adapter(config={"mock": WhatsappMock()})
+    msg = await adapter.on_message(
+        {"raw_body": raw_body, "headers": {"X-Twilio-Signature": signature}}
+    )
+    assert msg is not None
+    assert msg.channel_user_id == STRANGER_ID
+    assert msg.trust_level == "untrusted"
 
 
 @pytest.mark.asyncio
