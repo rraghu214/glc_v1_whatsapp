@@ -160,31 +160,41 @@ Your App ID is visible in **App Settings → Basic** at the top of the page, or 
 
 Copy it → `WHATSAPP_APP_ID`.
 
-### Step 11 — Start your tunnel and run the gateway
+### Step 11 — Run the demo webhook server and start your tunnel
+
+The gateway's own `/v1/channels/{name}` route is a **WebSocket** endpoint
+(`glc/routes/channels.py`) — Meta can only POST plain HTTP, so it can't
+reach that route directly (see
+[`help_docs/INBOUND_WEBHOOK_ARCHITECTURE.md`](help_docs/INBOUND_WEBHOOK_ARCHITECTURE.md)
+for the full picture). What actually receives Meta's webhook is
+`demo_webhook_server.py`, which calls the adapter directly.
 
 Open two terminals:
 
 ```bash
-# Terminal 1 — tunnel
-ngrok http 8111
+# Terminal 1 — the demo webhook server (listens on port 8765)
+uv run python glc/channels/catalogue/whatsapp/help_docs/US13_demo/scripts/demo_webhook_server.py
 ```
 
 ```bash
-# Terminal 2 — gateway
-cd glc_v1
-uv sync
-uv run glc serve
+# Terminal 2 — tunnel, pointed at the demo server's port, not the gateway's
+ngrok http 8765
 ```
 
-Note the `https://` URL that ngrok prints (e.g. `https://abc123.ngrok-free.app`). You will need this in the next step.
+Note the `https://` URL that ngrok prints (e.g. `https://abc123.ngrok-free.app`). You will need this in the next step. (You'll separately run `uv run glc serve` for the pairing step below — that one stays on `localhost:8111` and needs no tunnel.)
 
 ### Step 12 — Register the webhook in the Meta console
 
-1. In the Meta App Dashboard → **WhatsApp → Configuration → Webhook → Edit**.
+The Meta developer UI changed in 2025/2026 — the old "WhatsApp →
+Configuration → Webhook → Edit" path no longer exists. Current path:
+
+1. **developers.facebook.com → My Apps → (your app) → Use cases**
+   (left sidebar) → **Customize** on "Connect with customers through
+   WhatsApp" → **Step 2. Production setup → Configure Webhooks**.
 2. Set **Callback URL** to your tunnel URL (e.g. `https://abc123.ngrok-free.app`).
 3. Set **Verify Token** to the same value as `WHATSAPP_VERIFY_TOKEN` in your `.env`.
-4. Click **Verify and Save**. Meta sends a one-time GET request containing a `hub.challenge` value — the gateway echoes it back automatically and verification completes.
-5. Under **Webhook fields**, click **Subscribe** next to the **messages** field. Without this subscription, Meta will not forward inbound WhatsApp messages to your server.
+4. Click **Verify and Save**. Meta sends a one-time GET request containing a `hub.challenge` value — `demo_webhook_server.py` echoes it back automatically and verification completes.
+5. Toggle **Subscribe** on the **messages** row. Without this subscription, Meta will not forward inbound WhatsApp messages to your server.
 
 ### Step 13 — Pair your phone number
 
@@ -196,18 +206,29 @@ Get your installation token:
 uv run glc token
 ```
 
-Request a pairing code:
+Request a pairing code — `channel` and `channel_user_id` are required in the JSON body (`channel_user_id` is your own WhatsApp number, E.164 digits, no `+`, e.g. `91XXXXXXXXXX`):
 
 ```bash
 curl -X POST http://localhost:8111/v1/control/pair \
-  -H "Authorization: Bearer <your-token>"
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"channel":"whatsapp","channel_user_id":"91XXXXXXXXXX","user_handle":"owner","trust_level":"owner_paired"}'
 ```
 
-The response will contain a 6-digit pairing code. **Send that code as a WhatsApp message from your phone to the test number.** The gateway will confirm pairing — your number is now registered as the owner.
+The response contains a 6-digit code, e.g. `{"code":"186157","expires_at":...,"ttl_seconds":300}`. **This code is not confirmed by texting it anywhere** — nothing in the gateway watches inbound messages for a pending pairing code. Confirm it with a second call instead (valid 5 minutes):
+
+```bash
+curl -X POST http://localhost:8111/v1/control/pair/confirm \
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"code":"186157"}'
+```
+
+This second call is what actually registers you as `owner_paired`.
 
 ### Step 14 — Send your first message
 
-With the gateway running and your phone paired, send any message from your WhatsApp to the test number. You should receive a reply from the agent within a few seconds.
+With `demo_webhook_server.py` running (Step 11) and your phone paired (Step 13), send any message from your WhatsApp to the test number. You should receive a reply from the agent within a few seconds.
 
 > **24-hour window reminder:** Meta's re-engagement window means that if more than 24 hours pass without a message from your phone to the test number, the window closes. To reopen it, send any message to the test number first — the gateway does not automatically fall back to Twilio for this case (error `131047`). The automatic Twilio fallback only triggers on a separate error, `131030` (recipient not in Meta's allowed list). See [Provider Routing](#provider-routing) for details.
 
@@ -257,16 +278,22 @@ Twilio will send a confirmation message back to your phone confirming you have j
 
 > **Join codes expire every 3 days.** If messages stop delivering, re-send the join message. Twilio returns error `63016` when the join has expired.
 
-### Step 5 — Start your tunnel and run the gateway
+### Step 5 — Run the demo webhook server and start your tunnel
+
+Same server as the Meta setup handles Twilio too — `demo_webhook_server.py`
+dispatches by which signature header is present (`X-Hub-Signature-256` vs
+`X-Twilio-Signature`), so one running instance serves both providers.
+If it's already running from the Meta setup, skip to registering the
+webhook below; otherwise:
 
 ```bash
-# Terminal 1 — tunnel
-ngrok http 8111
+# Terminal 1 — the demo webhook server (listens on port 8765)
+uv run python glc/channels/catalogue/whatsapp/help_docs/US13_demo/scripts/demo_webhook_server.py
 ```
 
 ```bash
-# Terminal 2 — gateway
-uv run glc serve
+# Terminal 2 — tunnel, pointed at the demo server's port
+ngrok http 8765
 ```
 
 Note the `https://` URL printed by ngrok.
@@ -274,26 +301,39 @@ Note the `https://` URL printed by ngrok.
 ### Step 6 — Register the webhook in Twilio console
 
 1. On the Twilio sandbox page, open the **Sandbox Settings** tab.
-2. In the **"When a message comes in"** field, enter your tunnel URL followed by the channel path:
+2. In the **"When a message comes in"** field, enter your tunnel URL as-is (no path suffix — `demo_webhook_server.py` doesn't branch on path):
    ```
-   https://abc123.ngrok-free.app/v1/channels/whatsapp
+   https://abc123.ngrok-free.app
    ```
-3. Click **Save**.
-4. Copy the exact URL you just saved → `TWILIO_WEBHOOK_URL` in your `.env`.
+   Method: `POST`. Click **Save**.
+3. Copy the URL you just saved into `.env` as `TWILIO_WEBHOOK_URL`, **adding a trailing slash**:
+   ```
+   TWILIO_WEBHOOK_URL=https://abc123.ngrok-free.app/
+   ```
 
-> **Critical:** `TWILIO_WEBHOOK_URL` must match the webhook URL in Twilio's console character-for-character — including trailing slashes and `http` vs `https`. Any mismatch causes Twilio's HMAC-SHA1 signature validation to fail and all messages will be silently dropped.
+> **Critical:** Twilio signs its webhook using the URL **with a trailing slash** even when the console field is saved without one (the actual HTTP request line is `POST / HTTP/1.1`) — confirmed by capturing a real Twilio request and recomputing the signature both ways; only the trailing-slash form matched. `TWILIO_WEBHOOK_URL` must have that trailing slash regardless of what the console displays, or every signature check fails. Restart `demo_webhook_server.py` after changing `.env` — it loads `.env` once at startup.
 
 ### Step 7 — Pair your phone number
 
-Same pairing flow as Meta — the gateway requires your number to be registered before it processes your messages.
+Same pairing flow as Meta — the gateway requires your number to be registered before it processes your messages. This talks to the gateway on `localhost:8111` directly — no tunnel needed for pairing itself.
 
 ```bash
+uv run glc serve      # if not already running, in its own terminal
 uv run glc token
 curl -X POST http://localhost:8111/v1/control/pair \
-  -H "Authorization: Bearer <your-token>"
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"channel":"whatsapp","channel_user_id":"91XXXXXXXXXX","user_handle":"owner","trust_level":"owner_paired"}'
 ```
 
-Send the 6-digit code from your WhatsApp to the sandbox number to complete pairing.
+The response contains a 6-digit code, e.g. `{"code":"186157",...}`. Confirm it (this is the call that actually pairs you — texting the code anywhere does nothing):
+
+```bash
+curl -X POST http://localhost:8111/v1/control/pair/confirm \
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"code":"186157"}'
+```
 
 ### Step 8 — Send your first message
 
@@ -345,9 +385,9 @@ The provider cache is in-memory only and resets when the gateway restarts.
 | Meta error `190` | Access token expired | Regenerate the token from the Meta "Step 1. Try it out" panel and update `WHATSAPP_TOKEN` |
 | Twilio error `63016` | Sandbox join code expired | Re-send `join <code>` from your personal WhatsApp to the sandbox number |
 | Webhook verification fails (Meta) | Verify token mismatch | Ensure `WHATSAPP_VERIFY_TOKEN` in `.env` exactly matches what is entered in the Meta console |
-| Twilio signature validation fails | `TWILIO_WEBHOOK_URL` mismatch | Ensure `TWILIO_WEBHOOK_URL` exactly matches the URL saved in Twilio Sandbox Settings |
-| Gateway not receiving messages | Tunnel not running or wrong port | Confirm your tunnel is running and pointing to port 8111 |
-| `outbound_blocked` error | Recipient not paired | Pair the number first via `/v1/control/pair` |
+| Twilio signature validation fails | `TWILIO_WEBHOOK_URL` mismatch, or missing the trailing slash Twilio actually signs with | Ensure `TWILIO_WEBHOOK_URL` matches Twilio Sandbox Settings and ends in `/` — see Step 6's note. Restart `demo_webhook_server.py` after editing `.env` |
+| Not receiving messages at all | Tunnel not running, or pointing at the wrong port | `demo_webhook_server.py` listens on port **8765** — confirm `ngrok http 8765` is running and its URL is what's registered in the Meta/Twilio console (not port 8111, which is only the gateway/pairing endpoint) |
+| `outbound_blocked` error | Recipient not paired | Pair the number first via `/v1/control/pair` then `/v1/control/pair/confirm` |
 | Messages delivered to Meta but not Twilio | Sandbox join expired | Re-join the Twilio sandbox with the join code |
 | Gateway starts but channel not found | Adapter registration failed | Check `uv run glc serve` output for import errors in `adapter.py` |
 

@@ -20,6 +20,7 @@ the hub.challenge handshake).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -37,6 +38,10 @@ def _find_repo_root() -> Path:
 
 load_dotenv(_find_repo_root() / ".env")
 
+from glc.channels.catalogue.whatsapp.adapter import (  # noqa: E402
+    verify_meta_signature,
+    verify_twilio_signature,
+)
 from glc.channels.envelope import ChannelReply  # noqa: E402
 from glc.channels.registry import instantiate  # noqa: E402
 
@@ -44,6 +49,44 @@ VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "glc-verify-token-us1")
 PORT = int(os.environ.get("WEBHOOK_PORT", "8765"))
 
 adapter = instantiate("whatsapp")
+
+
+def _classify_drop_reason(raw_body: bytes, headers: dict[str, str]) -> str:
+    """Diagnostic-only re-check for the demo log — never affects on_message()'s
+    own decision. Meta sends a separate delivery-status webhook (sent/
+    delivered/read) for every message exchanged, which on_message() correctly
+    drops (no "messages" key to parse) — that's expected, not a signature or
+    trust failure, and the log line should say so rather than crying wolf.
+    """
+    lower_headers = {k.lower(): v for k, v in headers.items()}
+    twilio_sig = lower_headers.get("x-twilio-signature", "")
+    meta_sig = lower_headers.get("x-hub-signature-256", "")
+
+    if twilio_sig:
+        url = os.environ.get("TWILIO_WEBHOOK_URL", "")
+        auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+        parsed = parse_qs(raw_body.decode("utf-8", errors="replace"), keep_blank_values=True)
+        params = {k: v[0] if v else "" for k, v in parsed.items()}
+        if not verify_twilio_signature(url, params, twilio_sig, auth_token):
+            return "bad Twilio signature (X-Twilio-Signature did not verify)"
+        if not params.get("WaId"):
+            return "verified Twilio webhook but no WaId present (e.g. status callback)"
+        return "verified Twilio webhook but content unusable (unexpected shape)"
+
+    if meta_sig:
+        if not verify_meta_signature(raw_body, headers):
+            return "bad Meta signature (X-Hub-Signature-256 did not verify)"
+        try:
+            body = json.loads(raw_body)
+            value = body["entry"][0]["changes"][0]["value"]
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+            return "verified Meta webhook but unexpected payload shape"
+        if not value.get("messages"):
+            return ("verified Meta status callback (sent/delivered/read receipt) "
+                    "-- not an inbound message, no action needed")
+        return "verified Meta webhook but message content unusable (e.g. non-text type)"
+
+    return "no recognized signature header -- not from Meta or Twilio"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -80,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
     async def _handle_inbound(self, raw_body: bytes, headers: dict[str, str]) -> None:
         msg = await adapter.on_message({"raw_body": raw_body, "headers": headers})
         if msg is None:
-            print("[demo] dropped: bad signature or untrusted sender")
+            print(f"[demo] dropped: {_classify_drop_reason(raw_body, headers)}")
             return
 
         print(f"[demo] inbound provider={msg.metadata.get('provider')} "

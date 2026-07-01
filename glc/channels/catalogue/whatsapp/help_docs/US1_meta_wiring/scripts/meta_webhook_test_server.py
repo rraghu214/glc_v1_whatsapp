@@ -22,7 +22,7 @@ def _find_repo_root() -> Path:
     for p in Path(__file__).resolve().parents:
         if (p / "pyproject.toml").exists():
             return p
-    raise RuntimeError("pyproject.toml not found — run from within the repo")
+    raise RuntimeError("pyproject.toml not found -- run from within the repo")
 
 
 load_dotenv(_find_repo_root() / ".env")
@@ -48,13 +48,13 @@ class Handler(BaseHTTPRequestHandler):
         challenge = (params.get("hub.challenge")    or [""])[0]
 
         if mode == "subscribe" and token == VERIFY_TOKEN:
-            print(f"[webhook] ✅ Verification OK — challenge={challenge!r}")
+            print(f"[webhook] [OK] Verification OK -- challenge={challenge!r}")
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             self.wfile.write(challenge.encode())
         else:
-            print(f"[webhook] ❌ Bad verify_token: got {token!r}, expected {VERIFY_TOKEN!r}")
+            print(f"[webhook] [FAIL] Bad verify_token: got {token!r}, expected {VERIFY_TOKEN!r}")
             self.send_response(403)
             self.end_headers()
 
@@ -64,14 +64,14 @@ class Handler(BaseHTTPRequestHandler):
         sig    = self.headers.get("X-Hub-Signature-256", "")
 
         if APP_SECRET and not _verify_signature(body, sig):
-            print("[webhook] ⚠️  Signature mismatch — payload may be forged")
+            print("[webhook] [WARN] Signature mismatch -- payload may be forged")
             self.send_response(403)
             self.end_headers()
             return
 
         try:
             data = json.loads(body)
-            print("[webhook] ✅ Inbound payload:")
+            print("[webhook] [OK] Inbound payload:")
             print(json.dumps(data, indent=2))
         except Exception:
             print(f"[webhook] Raw body: {body!r}")
@@ -88,5 +88,5 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print(f"[webhook] Server listening on port {PORT}")
     print(f"[webhook] VERIFY_TOKEN = {VERIFY_TOKEN!r}")
-    print(f"[webhook] APP_SECRET   = {'(set)' if APP_SECRET else '(NOT SET — signature checks skipped)'}")
+    print(f"[webhook] APP_SECRET   = {'(set)' if APP_SECRET else '(NOT SET -- signature checks skipped)'}")
     HTTPServer(("", PORT), Handler).serve_forever()
