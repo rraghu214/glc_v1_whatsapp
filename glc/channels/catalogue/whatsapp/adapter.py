@@ -15,6 +15,13 @@ import httpx
 from twilio.request_validator import RequestValidator
 
 from glc.channels.base import ChannelAdapter
+from glc.channels.catalogue.whatsapp.schemas import (
+    MetaParsed,
+    MetaSendPayload,
+    MetaSendText,
+    TwilioParsed,
+    TwilioSendPayload,
+)
 from glc.channels.envelope import ChannelMessage, ChannelReply
 from glc.security.allowlists import allowed
 from glc.security.pairing import get_pairing_store
@@ -68,7 +75,7 @@ def verify_twilio_signature(url: str, params: dict, signature: str, auth_token: 
         return False
 
 
-def parse_meta_payload(body: dict) -> dict[str, Any] | None:
+def parse_meta_payload(body: dict) -> MetaParsed | None:
     try:
         value = body["entry"][0]["changes"][0]["value"]
     except (KeyError, IndexError):
@@ -87,18 +94,18 @@ def parse_meta_payload(body: dict) -> dict[str, Any] | None:
         text = msg.get("text", {}).get("body")
 
     try:
-        return {
-            "from_id": msg["from"],
-            "text": text,
-            "message_id": msg["id"],
-            "timestamp": msg["timestamp"],
-            "profile_name": profile_name,
-        }
+        return MetaParsed(
+            from_id=msg["from"],
+            text=text,
+            message_id=msg["id"],
+            timestamp=msg["timestamp"],
+            profile_name=profile_name,
+        )
     except (KeyError, TypeError):
         return None
 
 
-def parse_twilio_payload(payload: dict, received_at: datetime) -> dict[str, Any] | None:
+def parse_twilio_payload(payload: dict, received_at: datetime) -> TwilioParsed | None:
     """US-7: Parse Twilio Sandbox webhook payload."""
     from_id = payload.get("WaId")
     if not from_id:
@@ -106,16 +113,16 @@ def parse_twilio_payload(payload: dict, received_at: datetime) -> dict[str, Any]
 
     text = payload.get("Body") if payload.get("NumMedia", "0") == "0" else None
 
-    return {
-        "from_id": from_id,
-        "text": text,
-        "message_id": payload.get("MessageSid"),
-        "timestamp": received_at,
-        "profile_name": payload.get("ProfileName") or None,
-    }
+    return TwilioParsed(
+        from_id=from_id,
+        text=text,
+        message_id=payload.get("MessageSid"),
+        timestamp=received_at,
+        profile_name=payload.get("ProfileName") or None,
+    )
 
 
-def build_twilio_send_payload(to_phone: str, bot_phone: str, text: str | None) -> dict[str, str]:
+def build_twilio_send_payload(to_phone: str, bot_phone: str, text: str | None) -> TwilioSendPayload:
     """US-8: Build Twilio Sandbox outbound payload."""
     if not text:
         raise ValueError("build_twilio_send_payload: text must be a non-empty string")
@@ -126,22 +133,13 @@ def build_twilio_send_payload(to_phone: str, bot_phone: str, text: str | None) -
     if not to_phone.startswith("whatsapp:"):
         to_phone = f"whatsapp:{to_phone}"
 
-    return {
-        "To": to_phone,
-        "From": bot_phone,
-        "Body": text,
-    }
+    return TwilioSendPayload(To=to_phone, From=bot_phone, Body=text)
 
 
-def build_meta_send_payload(reply: ChannelReply) -> dict[str, Any]:
+def build_meta_send_payload(reply: ChannelReply) -> MetaSendPayload:
     if not reply.text:
         raise ValueError("build_meta_send_payload: reply.text must be a non-empty string")
-    return {
-        "messaging_product": "whatsapp",
-        "to": reply.channel_user_id,
-        "type": "text",
-        "text": {"body": reply.text},
-    }
+    return MetaSendPayload(to=reply.channel_user_id, text=MetaSendText(body=reply.text))
 
 
 def _parse_form_body(raw_body: bytes) -> dict[str, str]:
@@ -175,23 +173,23 @@ def _headers(raw: Any) -> dict[str, str]:
 
 
 def _to_channel_message(
-    parsed: dict[str, Any],
+    parsed: MetaParsed | TwilioParsed,
     *,
     provider: str,
     trust: TrustLevel,
 ) -> ChannelMessage:
-    if provider == "meta":
-        arrived_at = datetime.fromtimestamp(int(float(parsed["timestamp"])), tz=UTC)
+    if isinstance(parsed, MetaParsed):
+        arrived_at = datetime.fromtimestamp(int(float(parsed.timestamp)), tz=UTC)
     else:
-        arrived_at = parsed["timestamp"]
+        arrived_at = parsed.timestamp
     return ChannelMessage(
         channel="whatsapp",
-        channel_user_id=parsed["from_id"],
-        user_handle=parsed["profile_name"] or parsed["from_id"],
-        text=parsed["text"],
+        channel_user_id=parsed.from_id,
+        user_handle=parsed.profile_name or parsed.from_id,
+        text=parsed.text,
         trust_level=trust,
         arrived_at=arrived_at,
-        metadata={"provider": provider, "message_id": parsed["message_id"]},
+        metadata={"provider": provider, "message_id": parsed.message_id},
     )
 
 
@@ -223,14 +221,14 @@ def _twilio_from_or_error() -> str | dict[str, Any]:
     )
 
 
-async def _send_meta(payload: dict[str, Any]) -> dict[str, Any]:
+async def _send_meta(payload: MetaSendPayload) -> dict[str, Any]:
     phone_number_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
     token = os.environ.get("WHATSAPP_TOKEN", "")
     url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             url,
-            json=payload,
+            json=payload.model_dump(),
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -242,7 +240,7 @@ async def _send_meta(payload: dict[str, Any]) -> dict[str, Any]:
         return _error_result("meta", resp.status_code, "non_json_response", "non-JSON response")
 
 
-async def _send_twilio(payload: dict[str, str]) -> dict[str, Any]:
+async def _send_twilio(payload: TwilioSendPayload) -> dict[str, Any]:
     account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
     auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
     credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
@@ -250,7 +248,7 @@ async def _send_twilio(payload: dict[str, str]) -> dict[str, Any]:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             url,
-            data=payload,
+            data=payload.model_dump(),
             headers={"Authorization": f"Basic {credentials}"},
         )
     try:
@@ -269,7 +267,7 @@ class Adapter(ChannelAdapter):
 
         headers = _headers(raw)
         is_public = bool(self.config.get("is_public_channel", False))
-        parsed: dict[str, Any] | None = None
+        parsed: MetaParsed | TwilioParsed | None = None
         provider = "meta"
 
         if isinstance(raw, dict) and "raw_body" in raw:
@@ -310,10 +308,10 @@ class Adapter(ChannelAdapter):
             return None
 
         owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]
-        trust = classify("whatsapp", parsed["from_id"])
+        trust = classify("whatsapp", parsed.from_id)
         ok, _ = allowed(
             "whatsapp",
-            parsed["from_id"],
+            parsed.from_id,
             owner_ids=owner_ids,
             is_public_channel=is_public,
             was_mentioned=False,
@@ -331,7 +329,7 @@ class Adapter(ChannelAdapter):
                 return None
 
         if USE_PROVIDER_CACHE:
-            _remember_provider(parsed["from_id"], provider)
+            _remember_provider(parsed.from_id, provider)
 
         return _to_channel_message(parsed, provider=provider, trust=trust)
 
@@ -349,21 +347,21 @@ class Adapter(ChannelAdapter):
         if provider == "meta":
             payload = build_meta_send_payload(reply)
             if mock is not None:
-                return await mock.send(payload)
+                return await mock.send(payload.model_dump())
             return await _send_meta(payload)
 
         if provider == "twilio":
             bot_phone = _twilio_from_or_error()
             if isinstance(bot_phone, dict):
                 return bot_phone
-            payload = build_twilio_send_payload(reply.channel_user_id, bot_phone, reply.text)
+            payload_tw = build_twilio_send_payload(reply.channel_user_id, bot_phone, reply.text)
             if mock is not None:
-                return await mock.send(payload)
-            return await _send_twilio(payload)
+                return await mock.send(payload_tw.model_dump())
+            return await _send_twilio(payload_tw)
 
         meta_payload = build_meta_send_payload(reply)
         if mock is not None:
-            result = await mock.send(meta_payload)
+            result = await mock.send(meta_payload.model_dump())
             if _is_meta_131030(result):
                 bot_phone = _twilio_from_or_error()
                 if isinstance(bot_phone, dict):
@@ -371,7 +369,7 @@ class Adapter(ChannelAdapter):
                 twilio_payload = build_twilio_send_payload(
                     reply.channel_user_id, bot_phone, reply.text
                 )
-                twilio_result = await mock.send(twilio_payload)
+                twilio_result = await mock.send(twilio_payload.model_dump())
                 if USE_PROVIDER_CACHE and "error" not in twilio_result:
                     _remember_provider(reply.channel_user_id, "twilio")
                 return twilio_result
