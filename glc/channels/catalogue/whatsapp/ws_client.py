@@ -51,6 +51,7 @@ class GatewayWSClient:
             if self._is_closed():
                 self._ws = None
                 raise RuntimeError("GatewayWSClient is not connected")
+            assert self._ws is not None
 
             try:
                 await self._ws.send(msg.model_dump_json())

@@ -87,8 +87,8 @@ async def mock_gateway():
         await server.wait_closed()
 
 
-def _make_msg(**overrides) -> ChannelMessage:
-    defaults = {
+def _make_msg(**overrides: object) -> ChannelMessage:
+    defaults: dict[str, object] = {
         "channel": "whatsapp",
         "channel_user_id": "919999990000",
         "user_handle": "owner",
@@ -97,7 +97,7 @@ def _make_msg(**overrides) -> ChannelMessage:
         "arrived_at": datetime.now(UTC),
         "metadata": {"provider": "meta", "message_id": "wamid.test"},
     }
-    return ChannelMessage(**(defaults | overrides))
+    return ChannelMessage.model_validate(defaults | overrides)
 
 
 @pytest.mark.asyncio
