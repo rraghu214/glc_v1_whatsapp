@@ -150,9 +150,23 @@ The 24-hour token from the panel must be regenerated before every session. To av
 
 1. Open [Graph API Explorer](https://developers.facebook.com/tools/explorer/).
 2. Select your app from the top-right dropdown.
-3. Click **Generate Access Token** → select the `whatsapp_business_messaging` and `whatsapp_business_management` permissions.
-4. Exchange the short-lived token for a long-lived one using the Graph API Explorer (see [US1_meta_wiring_setup.md](help_docs/US1_meta_wiring/US1_meta_wiring_setup.md) step 10 for the full exchange procedure).
-5. Copy the resulting token → `WHATSAPP_TOKEN`.
+3. Click **Generate Access Token** → select the `whatsapp_business_messaging` and `whatsapp_business_management` permissions. Copy the resulting short-lived token.
+4. Exchange it for a 60-day token — run this from the repo root (works on any OS):
+   ```bash
+   uv run python -c "
+   import json, urllib.request, urllib.parse
+   params = urllib.parse.urlencode({
+       'grant_type': 'fb_exchange_token',
+       'client_id': 'YOUR_APP_ID',
+       'client_secret': 'YOUR_APP_SECRET',
+       'fb_exchange_token': 'YOUR_SHORT_LIVED_TOKEN',
+   })
+   with urllib.request.urlopen(f'https://graph.facebook.com/v20.0/oauth/access_token?{params}') as r:
+       print(json.loads(r.read())['access_token'])
+   "
+   ```
+   `YOUR_APP_ID` is from App Settings → Basic (also in the Explorer's URL); `YOUR_APP_SECRET` is `WHATSAPP_APP_SECRET` from Step 8; `YOUR_SHORT_LIVED_TOKEN` is what you just copied. A successful exchange prints a long token starting with `EAANZC...`.
+5. Copy the printed token → `WHATSAPP_TOKEN`. To regenerate after expiry, repeat only this step — no need to redo Steps 1–8.
 
 ### Step 10 — Collect your App ID
 
@@ -165,7 +179,7 @@ Copy it → `WHATSAPP_APP_ID`.
 The gateway's own `/v1/channels/{name}` route is a **WebSocket** endpoint
 (`glc/routes/channels.py`) — Meta can only POST plain HTTP, so it can't
 reach that route directly (see
-[`help_docs/INBOUND_WEBHOOK_ARCHITECTURE.md`](help_docs/INBOUND_WEBHOOK_ARCHITECTURE.md)
+[`docs/WEBHOOK_ARCHITECTURE_OPTIONS.md`](docs/WEBHOOK_ARCHITECTURE_OPTIONS.md)
 for the full picture). What actually receives Meta's webhook is
 `demo_webhook_server.py`, which calls the adapter directly.
 
@@ -173,7 +187,7 @@ Open two terminals:
 
 ```bash
 # Terminal 1 — the demo webhook server (listens on port 8765)
-uv run python glc/channels/catalogue/whatsapp/help_docs/US13_demo/scripts/demo_webhook_server.py
+uv run python glc/channels/catalogue/whatsapp/demo_webhook_server.py
 ```
 
 ```bash
@@ -288,7 +302,7 @@ webhook below; otherwise:
 
 ```bash
 # Terminal 1 — the demo webhook server (listens on port 8765)
-uv run python glc/channels/catalogue/whatsapp/help_docs/US13_demo/scripts/demo_webhook_server.py
+uv run python glc/channels/catalogue/whatsapp/demo_webhook_server.py
 ```
 
 ```bash

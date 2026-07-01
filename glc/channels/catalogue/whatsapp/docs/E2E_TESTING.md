@@ -1,6 +1,6 @@
 # E2E Testing — WhatsApp Adapter (US-13)
 
-Companion to [`../INBOUND_WEBHOOK_ARCHITECTURE.md`](../INBOUND_WEBHOOK_ARCHITECTURE.md),
+Companion to [`WEBHOOK_ARCHITECTURE_OPTIONS.md`](WEBHOOK_ARCHITECTURE_OPTIONS.md),
 which defines three approaches to getting an inbound webhook to
 `adapter.py`. This doc is the actual runbook for testing them — including
 screenshots from the live run that produced two confirmed real round-trips
@@ -10,7 +10,7 @@ screenshots from the live run that produced two confirmed real round-trips
 |---|---|
 | **1 — Dev/POC** | Done in US-1 (`meta_webhook_test_server.py`), superseded — not re-tested here. |
 | **2 — Our Demo Approach** | **Covered below in full, with screenshots.** This is what the US-13 demo video shows. |
-| **3 — Standardized gateway route** | Parked in backlog. Placeholder at the end of this doc — not part of the US-1..15 submission. When picked up, it becomes its own separate PR to `theschoolofai/glc_v1:main` touching only `glc/routes/channels.py` (shared code, `@theschoolofai` review — see `INBOUND_WEBHOOK_ARCHITECTURE.md`'s "Why this isn't done yet"). |
+| **3 — Standardized gateway route** | Parked in backlog. Placeholder at the end of this doc — not part of the US-1..15 submission. When picked up, it becomes its own separate PR to `theschoolofai/glc_v1:main` touching only `glc/routes/channels.py` (shared code, `@theschoolofai` review — see `WEBHOOK_ARCHITECTURE_OPTIONS.md`'s "Why this isn't done yet"). |
 
 Automated regression coverage already exists and does **not** need to be
 re-proven live: `tests/channels/test_whatsapp.py` (7 fixed Meta tests) and
@@ -27,8 +27,8 @@ that the wire actually reaches Meta/Twilio's real servers and a real
 WhatsApp message round-trips end to end.
 
 Screenshots referenced below live in
-[`screenshots/`](screenshots/) alongside this doc, numbered to match each
-step (`01_...png`, `02_...png`, ...).
+[`screenshots/e2e_testing/`](../assets/screenshots/e2e_testing/) alongside this doc, numbered to
+match each step (`01_...png`, `02_...png`, ...).
 
 ---
 
@@ -45,7 +45,7 @@ message — for **both** providers. This is the recording for `US-13`.
 The GLC gateway (`glc/main.py`) is only needed for the **pairing**
 handshake (`/v1/control/pair`); once paired, `demo_webhook_server.py`
 talks to the adapter directly and the gateway's allowlist/rate-limit/audit
-pipeline is bypassed (see `INBOUND_WEBHOOK_ARCHITECTURE.md`'s note on this
+pipeline is bypassed (see `WEBHOOK_ARCHITECTURE_OPTIONS.md`'s note on this
 — it's intentional and sufficient for the demo bar).
 
 ### What to have ready before you start
@@ -92,13 +92,13 @@ pure localhost, no tunnel involved yet:
 ```bash
 uv run glc serve
 ```
-![glc serve](screenshots/01_glc_serve.png)
+![glc serve](../assets/screenshots/e2e_testing/01_glc_serve.png)
 
 **Step 2 — get your installation token** (same or a second terminal):
 ```bash
 uv run glc token
 ```
-![glc token](screenshots/02_glc_token.png)
+![glc token](../assets/screenshots/e2e_testing/02_glc_token.png)
 
 **Step 3 — pair your phone as owner, part 1: request a code.** The
 pairing DB is sqlite at `~/.glc/pairings.sqlite` and survives restarts,
@@ -115,7 +115,7 @@ curl -X POST http://localhost:8111/v1/control/pair \
 no `+` (e.g. `91XXXXXXXXXX`) — the same format Meta/Twilio put in the
 `from`/`WaId` field of any inbound webhook. Response looks like
 `{"code":"186157","expires_at":...,"ttl_seconds":300}`.
-![pair request/response](screenshots/03_pair_request_response.png)
+![pair request/response](../assets/screenshots/e2e_testing/03_pair_request_response.png)
 
 **Step 4 — pair your phone as owner, part 2: confirm the code**
 (valid 5 minutes):
@@ -127,7 +127,7 @@ curl -X POST http://localhost:8111/v1/control/pair/confirm \
 ```
 This second call is what actually registers you as `owner_paired` — the
 first call only issues the code.
-![pair confirm request/response](screenshots/04_pair_confirm_request_response.png)
+![pair confirm request/response](../assets/screenshots/e2e_testing/04_pair_confirm_request_response.png)
 
 **Step 5 — optional: verify the pairing landed in sqlite**, without
 revealing your phone number:
@@ -149,7 +149,7 @@ Expect `('whatsapp', 'owner_paired', <timestamp>, 12)`.
 uv run python glc/channels/catalogue/whatsapp/demo_webhook_server.py
 ```
 Listens on port **8765**, separate from the gateway's 8111.
-![demo server startup](screenshots/06_demo_server_start.png)
+![demo server startup](../assets/screenshots/e2e_testing/06_demo_server_start.png)
 
 **Step 7 — start the tunnel, pointed at the demo server** (another
 fresh terminal — not the gateway's port):
@@ -158,7 +158,7 @@ ngrok http 8765
 ```
 Note the printed `https://...ngrok-free.app` URL — this is the one that
 goes into the Meta/Twilio consoles, not the 8111 used for pairing above.
-![ngrok tunnel](screenshots/07_ngrok_tunnel.png)
+![ngrok tunnel](../assets/screenshots/e2e_testing/07_ngrok_tunnel.png)
 
 **Step 8 — register the same URL in both consoles.**
 `demo_webhook_server.py` dispatches Meta vs. Twilio by which signature
@@ -172,11 +172,11 @@ Edit" path referenced elsewhere no longer exists): **developers.facebook.com
 Configure Webhooks**. Callback URL = the ngrok URL, Verify Token =
 `WHATSAPP_VERIFY_TOKEN`. Click **Verify and Save**, then toggle
 **Subscribe** on the **messages** row.
-![Meta webhook config](screenshots/08a_meta_webhook_config.png)
+![Meta webhook config](../assets/screenshots/e2e_testing/08a_meta_webhook_config.png)
 
 **8b — Twilio**: **Sandbox Settings → "When a message comes in"** → same
 ngrok URL, Method = `POST` → **Save**.
-![Twilio sandbox config](screenshots/08b_twilio_sandbox_config.png)
+![Twilio sandbox config](../assets/screenshots/e2e_testing/08b_twilio_sandbox_config.png)
 
 Then set in `.env`:
 ```
@@ -210,7 +210,7 @@ the `hello_world` template). Expect in the demo server terminal:
 [demo] send() result: {'messaging_product': 'whatsapp', ...}
 ```
 and a reply `[glc echo] ...` on your phone.
-![Meta round-trip on phone](screenshots/10_meta_roundtrip_phone.png)
+![Meta round-trip on phone](../assets/screenshots/e2e_testing/10_meta_roundtrip_phone.png)
 
 **Step 11 — Twilio round-trip.** Text the Twilio sandbox number. Expect:
 ```
@@ -219,7 +219,7 @@ and a reply `[glc echo] ...` on your phone.
 ```
 and a reply on your phone via the sandbox number. (If you hit
 `bad Twilio signature` here, see the trailing-slash gotcha in step 8b.)
-![Twilio round-trip terminal](screenshots/11_twilio_roundtrip_terminal.png)
+![Twilio round-trip terminal](../assets/screenshots/e2e_testing/11_twilio_roundtrip_terminal.png)
 
 Record both. That's the two real round-trips `US-13` needs. **Confirmed
 working end to end for both providers** on this fork (2026-07-01).
@@ -239,7 +239,7 @@ the security boundary as well as the happy path.
 
 Provider-specific issues (expired token, expired sandbox join, signature
 mismatch) are already covered in `README.md`'s
-[Troubleshooting](../../README.md#troubleshooting) table — check there
+[Troubleshooting](../README.md#troubleshooting) table — check there
 first. E2E-specific ones:
 
 | Symptom | Cause | Fix |
@@ -264,7 +264,7 @@ live.
 ## Approach 3 — Standardized Gateway Route (backlog placeholder)
 
 **Status: parked.** Not attempted as part of `US-1` through `US-15`. See
-`INBOUND_WEBHOOK_ARCHITECTURE.md`'s Approach 3 section for the exact
+`WEBHOOK_ARCHITECTURE_OPTIONS.md`'s Approach 3 section for the exact
 routes (`GET`/`POST /v1/channels/{name}/webhook`) that would need to be
 added to `glc/routes/channels.py`.
 

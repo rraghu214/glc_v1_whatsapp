@@ -1,4 +1,4 @@
-"""Approach 2 demo webhook server for US-13 (see ../../INBOUND_WEBHOOK_ARCHITECTURE.md).
+"""Approach 2 demo webhook server for US-13 (see docs/WEBHOOK_ARCHITECTURE_OPTIONS.md).
 
 Receives Meta/Twilio's raw HTTP POST directly and calls the WhatsApp adapter's
 on_message()/send() directly. The GLC gateway is NOT in this path — its
@@ -6,7 +6,7 @@ allowlist/rate-limit/audit pipeline is bypassed. That's Approach 3 (out of
 scope: shared glc/routes/channels.py, separate maintainer PR, post-US-15).
 
 Run from repo root:
-    uv run python glc/channels/catalogue/whatsapp/help_docs/US13_demo/scripts/demo_webhook_server.py
+    uv run python glc/channels/catalogue/whatsapp/demo_webhook_server.py
 
 Listens on port 8765 by default (put this behind ngrok and register the
 public URL + WHATSAPP_VERIFY_TOKEN in the Meta/Twilio console).
