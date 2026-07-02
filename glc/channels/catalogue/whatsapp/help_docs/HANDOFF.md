@@ -87,6 +87,33 @@ here instead of guessed.
   §0.1's shared-code exception). Until that PR merges, `adapter.py` will raise
   `ModuleNotFoundError` on a clean install. Raise this PR before `US-9` branches
   from `integration`.
+- **`glc/routes/channels.py` — Approach 3 webhook route (pending separate PR to
+  TSAI).** Adds `GET`/`POST /v1/channels/{name}/webhook` so the gateway itself
+  can receive inbound Meta/Twilio webhooks (see
+  `help_docs/INBOUND_WEBHOOK_ARCHITECTURE.md`, Approach 3). `channels.py` is
+  outside the owned path — same shared-code exception as above: separate PR,
+  `@theschoolofai` review, branch-protection bypass. Prototyped and tested
+  locally on branch `feature/us-b2-approach3`; not part of the US-1 through
+  US-15 submission.
+- **`glc/main.py` — `.env` path resolution bug fix (pending separate PR to
+  TSAI).** Line 19 resolved `.env` one directory above the actual repo root
+  (`ROOT.parent.parent` instead of `ROOT.parent`), so `load_dotenv()` silently
+  loaded nothing whenever `glc serve` ran from a clean checkout — every env var
+  it's responsible for (`WHATSAPP_VERIFY_TOKEN`, `TWILIO_AUTH_TOKEN`, etc., for
+  all 15 channels, not just WhatsApp) was affected. Found while testing
+  Approach 3, since Approach 2's `demo_webhook_server.py` has its own correct
+  `_find_repo_root()` and never depended on `main.py`. `main.py` is outside the
+  owned path — same shared-code exception. One-line fix on
+  `feature/us-b2-approach3`.
+- **`glc/channels.yaml` — `twilio_voice` YAML typo (pending separate PR to
+  TSAI, independent of whether whatsapp gets enabled).** Line 24 was
+  `twilio_voice:{enabled: false}` — missing space after the colon, which YAML
+  parses as a single scalar key/value instead of a nested mapping, so
+  `configure_from_yaml()` in `glc/security/rate_limits.py` throws
+  `AttributeError` the moment anything calls `get_rate_limiter()` against the
+  real packaged file (e.g. Approach 3's webhook route, or any WS adapter
+  connection). Affects every channel's rate limiting, not just WhatsApp's.
+  `channels.yaml` is outside the owned path — same shared-code exception.
 
 ### §0.3 Authorization/policy gaps — found by re-reading `glc/routes/channels.py`,
 `glc/security/rate_limits.py`, and `tests/test_audit_log.py` directly

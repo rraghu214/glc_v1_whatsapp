@@ -186,16 +186,18 @@ for the full picture). What actually receives Meta's webhook is
 Open two terminals:
 
 ```bash
-# Terminal 1 — the demo webhook server (listens on port 8765)
+# Terminal 1 — the demo webhook server (listens on port 8111 by default,
+# same as the gateway — stop `glc serve` first if it's still running,
+# since the two are mutually exclusive)
 uv run python glc/channels/catalogue/whatsapp/demo_webhook_server.py
 ```
 
 ```bash
-# Terminal 2 — tunnel, pointed at the demo server's port, not the gateway's
-ngrok http 8765
+# Terminal 2 — tunnel, pointed at port 8111
+ngrok http 8111
 ```
 
-Note the `https://` URL that ngrok prints (e.g. `https://abc123.ngrok-free.app`). You will need this in the next step. (You'll separately run `uv run glc serve` for the pairing step below — that one stays on `localhost:8111` and needs no tunnel.)
+Note the `https://` URL that ngrok prints (e.g. `https://abc123.ngrok-free.app`). You will need this in the next step. (You'll separately run `uv run glc serve` for the pairing step below — that one also uses `localhost:8111` and needs no tunnel, since pairing is a local-only call. Because both share the same port, the same ngrok tunnel and console URL stay valid whichever of the two is currently running.)
 
 ### Step 12 — Register the webhook in the Meta console
 
@@ -301,13 +303,13 @@ If it's already running from the Meta setup, skip to registering the
 webhook below; otherwise:
 
 ```bash
-# Terminal 1 — the demo webhook server (listens on port 8765)
+# Terminal 1 — the demo webhook server (listens on port 8111)
 uv run python glc/channels/catalogue/whatsapp/demo_webhook_server.py
 ```
 
 ```bash
 # Terminal 2 — tunnel, pointed at the demo server's port
-ngrok http 8765
+ngrok http 8111
 ```
 
 Note the `https://` URL printed by ngrok.
@@ -400,7 +402,7 @@ The provider cache is in-memory only and resets when the gateway restarts.
 | Twilio error `63016` | Sandbox join code expired | Re-send `join <code>` from your personal WhatsApp to the sandbox number |
 | Webhook verification fails (Meta) | Verify token mismatch | Ensure `WHATSAPP_VERIFY_TOKEN` in `.env` exactly matches what is entered in the Meta console |
 | Twilio signature validation fails | `TWILIO_WEBHOOK_URL` mismatch, or missing the trailing slash Twilio actually signs with | Ensure `TWILIO_WEBHOOK_URL` matches Twilio Sandbox Settings and ends in `/` — see Step 6's note. Restart `demo_webhook_server.py` after editing `.env` |
-| Not receiving messages at all | Tunnel not running, or pointing at the wrong port | `demo_webhook_server.py` listens on port **8765** — confirm `ngrok http 8765` is running and its URL is what's registered in the Meta/Twilio console (not port 8111, which is only the gateway/pairing endpoint) |
+| Not receiving messages at all | Tunnel not running, or the gateway is still holding port 8111 | `demo_webhook_server.py` listens on port **8111** — same as the gateway. Stop `glc serve` first, confirm `ngrok http 8111` is running, and check its URL is what's registered in the Meta/Twilio console |
 | `outbound_blocked` error | Recipient not paired | Pair the number first via `/v1/control/pair` then `/v1/control/pair/confirm` |
 | Messages delivered to Meta but not Twilio | Sandbox join expired | Re-join the Twilio sandbox with the join code |
 | Gateway starts but channel not found | Adapter registration failed | Check `uv run glc serve` output for import errors in `adapter.py` |

@@ -114,20 +114,18 @@ proposed. B2's scope will need to be revised in light of Approach 3.
 **Purpose:** Prove the full adapter works end-to-end. Calls `adapter.on_message()`
 and `adapter.send()`. `demo_webhook_server.py` must be written as part of US-13.
 
-**Startup sequence (3 terminals):**
+**Startup sequence (2 terminals):** `demo_webhook_server.py` doesn't call into
+`glc/main.py` at all (it loads `.env` and the adapter directly), so the gateway
+isn't needed here. It defaults to port 8111 — same as `glc serve`'s default —
+since this script and the gateway are mutually exclusive and never run together.
 
 ```
 Terminal 1                              Terminal 2                Meta/Twilio Console
 ─────────────────────────────           ──────────────            ─────────────────────
-uv run python glc/main.py               ngrok http 8765           Webhook URL:
-  → GLC gateway on :8111                                          https://abc.ngrok.app/
-                                        → prints public URL
-Terminal 3
-─────────────────────────────
-uv run python
-  .../US13_demo/scripts/
-  demo_webhook_server.py
-  → Listens on :8765
+uv run python                           ngrok http 8111           Webhook URL:
+  glc/channels/catalogue/whatsapp/                                https://abc.ngrok.app/
+  demo_webhook_server.py                → prints public URL
+  → Listens on :8111
 ```
 
 **Flow — Inbound (receiving a message):**
@@ -141,7 +139,7 @@ Meta / Twilio
     │ Headers: X-Hub-Signature-256 (Meta) or X-Twilio-Signature (Twilio)
     │ Body: raw wire-format payload
     ▼
-ngrok tunnel → localhost:8765
+ngrok tunnel → localhost:8111
     ▼
 demo_webhook_server.py                 ← glc/channels/catalogue/whatsapp/demo_webhook_server.py
     │ reads raw_body (bytes) + headers (dict)
