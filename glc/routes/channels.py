@@ -14,6 +14,7 @@ back so adapter authors can verify their wire is plumbed correctly.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 
@@ -124,7 +125,7 @@ async def channel_webhook_verify(name: str, request: Request):
     token = params.get("hub.verify_token", "")
     challenge = params.get("hub.challenge", "")
     expected = os.environ.get(f"{name.upper()}_VERIFY_TOKEN", "")
-    if mode == "subscribe" and token == expected:
+    if mode == "subscribe" and hmac.compare_digest(token, expected):
         return PlainTextResponse(challenge)
     raise HTTPException(status_code=403)
 
