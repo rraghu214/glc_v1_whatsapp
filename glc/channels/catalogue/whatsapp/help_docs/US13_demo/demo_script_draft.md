@@ -34,7 +34,7 @@ or just cut straight to the terminal — whichever is faster to set up.)*
 > providers on one tunnel."
 
 *(Quick screen glance: terminal showing `[demo] Approach 2 (US-13) server
-listening on port 8765`. Do not narrate the pairing steps — say only:)*
+listening on port 8111`. Do not narrate the pairing steps — say only:)*
 
 > "My phone's already paired as the owner, so I can go straight to
 > sending messages."

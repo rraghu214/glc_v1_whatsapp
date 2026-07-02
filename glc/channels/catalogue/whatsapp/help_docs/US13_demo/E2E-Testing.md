@@ -144,20 +144,23 @@ if os.path.exists(p):
 ```
 Expect `('whatsapp', 'owner_paired', <timestamp>, 12)`.
 
-**Step 6 — start the actual demo server** (a fresh terminal):
+**Step 6 — stop the gateway, then start the demo server** (same terminal
+or a fresh one — the two are mutually exclusive and both default to
+port 8111, so only one can be bound at a time):
 ```bash
 uv run python glc/channels/catalogue/whatsapp/demo_webhook_server.py
 ```
-Listens on port **8765**, separate from the gateway's 8111.
+Listens on port **8111** — same as the gateway used for pairing above.
 ![demo server startup](screenshots/06_demo_server_start.png)
 
-**Step 7 — start the tunnel, pointed at the demo server** (another
-fresh terminal — not the gateway's port):
+**Step 7 — reuse the same tunnel from pairing** (or start one if you
+haven't yet):
 ```bash
-ngrok http 8765
+ngrok http 8111
 ```
-Note the printed `https://...ngrok-free.app` URL — this is the one that
-goes into the Meta/Twilio consoles, not the 8111 used for pairing above.
+Since the demo server and the gateway share port 8111, the same ngrok
+URL used for pairing keeps working here — no need to swap tunnels or
+reconfigure the Meta/Twilio console between steps.
 ![ngrok tunnel](screenshots/07_ngrok_tunnel.png)
 
 **Step 8 — register the same URL in both consoles.**
@@ -245,19 +248,18 @@ first. E2E-specific ones:
 | Symptom | Cause | Fix |
 |---|---|---|
 | `outbound_blocked` on first message | Expected — you haven't paired yet | Run the pair + pair/confirm calls above, then resend |
-| Nothing prints in the demo server terminal at all | ngrok URL points at the wrong port | `demo_webhook_server.py` listens on **8765** (`WEBHOOK_PORT`), not the gateway's 8111. Once you're past pairing, run `ngrok http 8765` and register *that* URL in the Meta/Twilio console — not the 8111 tunnel used for pairing. |
+| Nothing prints in the demo server terminal at all | the demo server isn't actually running, or the gateway is still holding port 8111 | `demo_webhook_server.py` listens on **8111** (`WEBHOOK_PORT`) — same port as the gateway. Stop `glc serve` before starting the demo server; both can't bind 8111 at once. |
 | 422 from `/v1/control/pair` | Missing JSON body (bug #1 above) | Use the corrected curl with `-d` and `Content-Type: application/json` |
 | Paired but still `trust=untrusted` | Wrong `channel_user_id` format | Must be bare digits, no `+`, no `whatsapp:` prefix — matches the `WaId`/`from` field exactly |
 | `[demo] dropped: bad Twilio signature ...` | `TWILIO_WEBHOOK_URL` missing the trailing slash Twilio actually signs with | Add the trailing `/` (see step 8b), restart the demo server, resend |
 | `[demo] dropped: verified Meta status callback ...` (repeated 2-3x per message) | Normal — Meta sends separate sent/delivered/read receipt webhooks for every message, which correctly have no `messages` key | Not an error, no action needed (see `HANDOFF.md` §7.4) |
 
 **Note on ports:** pairing happens through the gateway on **8111**;
-message delivery happens through the demo server on **8765**. Two
-different tunnels are needed if both are run against ngrok simultaneously
-— or run the gateway/pairing step first, stop that tunnel, then start a
-fresh tunnel against 8765 for the actual message test. Update the
-Meta/Twilio console webhook URL to match whichever tunnel is currently
-live.
+message delivery happens through the demo server, also on **8111**
+by default. They're mutually exclusive — stop the gateway before
+starting the demo server. Because both use the same port, the same
+ngrok tunnel and the same Meta/Twilio console URL stay valid across
+both steps; no reconfiguration needed when switching between them.
 
 ---
 
