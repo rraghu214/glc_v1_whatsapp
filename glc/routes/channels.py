@@ -134,7 +134,7 @@ async def channel_webhook(name: str, request: Request):
     try:
         adapter = registry.instantiate(name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"unknown channel: {name}")
+        raise HTTPException(status_code=404, detail=f"unknown channel: {name}") from None
 
     raw = {
         "raw_body": await request.body(),
