@@ -18,7 +18,7 @@ import json
 import os
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from glc.audit import append as audit_append
 from glc.channels import registry
@@ -174,7 +174,7 @@ async def channel_webhook(name: str, request: Request):
             event_type="rate_limit",
             result={"reason": why},
         )
-        return {"status": 429, "error": why}
+        return JSONResponse(status_code=429, content={"error": why})
 
     audit_append(
         channel=msg.channel,
