@@ -181,7 +181,7 @@ async def channel_webhook(name: str, request: Request):
         channel_user_id=msg.channel_user_id,
         trust_level=msg.trust_level,
         event_type="inbound_message",
-        params={"text": msg.text, "thread_id": msg.thread_id},
+        params={"text": msg.text, "thread_id": msg.thread_id, "provider": msg.metadata.get("provider")},
     )
 
     reply = ChannelReply(
