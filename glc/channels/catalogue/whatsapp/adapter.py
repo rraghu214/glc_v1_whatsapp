@@ -310,7 +310,7 @@ class Adapter(ChannelAdapter):
 
         owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]
         trust = classify("whatsapp", parsed.from_id)
-        ok, _ = allowed(
+        ok, why = allowed(
             "whatsapp",
             parsed.from_id,
             owner_ids=owner_ids,
@@ -318,15 +318,19 @@ class Adapter(ChannelAdapter):
             was_mentioned=False,
         )
         if not ok:
-            # channels.yaml has whatsapp: enabled: false, so allowed() returns False
-            # for everyone including owners. Until that is fixed, only enforce the
-            # drop for public-channel untrusted strangers; owners and known users
-            # in DM mode pass through.
-            # TODO: replace this block with `return None` once channels.yaml enables
-            # the channel — the inner check must not remain after enable or BOTH
-            # owner_paired AND user_paired senders in public channels would bypass
-            # the mention-gate (allowed() returns False for them too when not mentioned).
-            if is_public and trust == "untrusted":
+            # channels.yaml ships with whatsapp disabled until a separate
+            # shared-code PR (outside this slot's owned path) flips it, which
+            # makes allowed() reject everyone, including owners. Detect that
+            # specific case by its reason string and fall back to enforcing
+            # only the public+untrusted drop, so the adapter stays usable
+            # before that PR lands. Once the channel is enabled, allowed()
+            # never returns this reason again, so this branch goes dead on
+            # its own and every rejection below correctly falls through to
+            # `return None` — no follow-up change needed either way.
+            if "disabled in channels.yaml" in why:
+                if is_public and trust == "untrusted":
+                    return None
+            else:
                 return None
 
         if USE_PROVIDER_CACHE:
