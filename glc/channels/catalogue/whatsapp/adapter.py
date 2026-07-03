@@ -12,7 +12,6 @@ from typing import Any
 from urllib.parse import parse_qs
 
 import httpx
-from twilio.request_validator import RequestValidator
 
 from glc.channels.base import ChannelAdapter
 from glc.channels.catalogue.whatsapp.schemas import (
@@ -69,6 +68,8 @@ def verify_twilio_signature(url: str, params: dict, signature: str, auth_token: 
     if not auth_token or not signature:
         return False
     try:
+        from twilio.request_validator import RequestValidator
+
         validator = RequestValidator(auth_token)
         return validator.validate(url, params, signature)
     except Exception:

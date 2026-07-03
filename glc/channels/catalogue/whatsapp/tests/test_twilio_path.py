@@ -147,7 +147,7 @@ def test_verify_twilio_signature_none_credentials():
 
 
 def test_verify_twilio_signature_exception_returns_false():
-    with patch("glc.channels.catalogue.whatsapp.adapter.RequestValidator") as mock_cls:
+    with patch("twilio.request_validator.RequestValidator") as mock_cls:
         mock_cls.return_value.validate.side_effect = Exception("SDK error")
         assert verify_twilio_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, "sig", AUTH_TOKEN) is False
 
