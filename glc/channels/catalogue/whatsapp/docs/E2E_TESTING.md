@@ -98,7 +98,6 @@ uv run glc serve
 ```bash
 uv run glc token
 ```
-![glc token](../assets/screenshots/e2e_testing/02_glc_token.png)
 
 **Step 3 — pair your phone as owner, part 1: request a code.** The
 pairing DB is sqlite at `~/.glc/pairings.sqlite` and survives restarts,
@@ -127,7 +126,6 @@ curl -X POST http://localhost:8111/v1/control/pair/confirm \
 ```
 This second call is what actually registers you as `owner_paired` — the
 first call only issues the code.
-![pair confirm request/response](../assets/screenshots/e2e_testing/04_pair_confirm_request_response.png)
 
 **Step 5 — optional: verify the pairing landed in sqlite**, without
 revealing your phone number:
@@ -151,7 +149,6 @@ port 8111, so only one can be bound at a time):
 uv run python glc/channels/catalogue/whatsapp/demo_webhook_server.py
 ```
 Listens on port **8111** — same as the gateway used for pairing above.
-![demo server startup](../assets/screenshots/e2e_testing/06_demo_server_start.png)
 
 **Step 7 — reuse the same tunnel from pairing** (or start one if you
 haven't yet):
@@ -161,7 +158,6 @@ ngrok http 8111
 Since the demo server and the gateway share port 8111, the same ngrok
 URL used for pairing keeps working here — no need to swap tunnels or
 reconfigure the Meta/Twilio console between steps.
-![ngrok tunnel](../assets/screenshots/e2e_testing/07_ngrok_tunnel.png)
 
 **Step 8 — register the same URL in both consoles.**
 `demo_webhook_server.py` dispatches Meta vs. Twilio by which signature

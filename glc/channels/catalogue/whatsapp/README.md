@@ -76,17 +76,11 @@ You will be asked to fill in a name and contact email for your app. This is just
 
 On the next screen, select **"Connect with customers through WhatsApp"** as your use case.
 
-![Use case selection](assets/screenshots/meta_02_use_cases.png)
-
 ### Step 3 — Attach a Business Portfolio
 
 Meta requires a Business Portfolio to be associated with the app. If you do not have one yet, you will be prompted to create one. An unverified portfolio is fine for testing — no business documents are required at this stage.
 
-![Business portfolio prompt](assets/screenshots/meta_03_business_no_portfolio.png)
-
 If prompted to verify, click **"Verify Later"** to skip and continue.
-
-![Verify later modal](assets/screenshots/meta_04_verify_later_modal.png)
 
 ### Step 4 — Finish app creation
 
@@ -96,27 +90,17 @@ Review the summary screen and click **Create App**.
 
 You will land on the app dashboard.
 
-![App dashboard](assets/screenshots/meta_06_dashboard.png)
-
 ### Step 5 — Navigate to the WhatsApp setup
 
 From the left sidebar, go to **Use Cases**, find the WhatsApp entry, and click **Customize**.
 
-![Use cases page](assets/screenshots/meta_07_use_cases_page.png)
-
 Then click **Continue** to proceed.
-
-![Customize continue](assets/screenshots/meta_08_customize_continue.png)
 
 ### Step 6 — Open the API integration panel
 
 Click **Integrate with API**.
 
-![Integrate with API](assets/screenshots/meta_09_integrate_with_api.png)
-
 You will be asked to confirm your OAuth account.
-
-![OAuth accounts](assets/screenshots/meta_10_oauth_accounts.png)
 
 ### Step 7 — Collect your credentials from the "Try it out" panel
 
@@ -258,8 +242,6 @@ Twilio acts as a relay — inbound WhatsApp messages arrive at Twilio's servers 
 
 Go to [console.twilio.com](https://console.twilio.com) and sign up. Choose the free trial plan — it is sufficient for all testing purposes.
 
-![Choose plan](assets/screenshots/twilio_01_choose_plan.png)
-
 ### Step 2 — Collect your Account SID and Auth Token
 
 After signing in, your **Account SID** and **Auth Token** are shown on the Console home page.
@@ -273,8 +255,6 @@ Copy them to your `.env`:
 ### Step 3 — Activate the WhatsApp Sandbox
 
 In the Twilio Console, go to **Messaging → Try it out → Send a WhatsApp message**. Accept the sandbox terms when prompted.
-
-![Activate sandbox](assets/screenshots/twilio_03_activate_sandbox.png)
 
 Take note of the sandbox number shown on this page (e.g. `+14155238886`) and copy it → `TWILIO_WHATSAPP_FROM` (with the `whatsapp:` prefix, e.g. `whatsapp:+14155238886`).
 
