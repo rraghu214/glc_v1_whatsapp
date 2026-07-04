@@ -161,15 +161,9 @@ def _headers(raw: Any) -> dict[str, str]:
     if isinstance(raw, dict):
         headers = raw.get("headers") or {}
         if isinstance(headers, dict):
-            return {
-                _stringify_header_part(k).lower(): _stringify_header_part(v)
-                for k, v in headers.items()
-            }
+            return {_stringify_header_part(k).lower(): _stringify_header_part(v) for k, v in headers.items()}
         if isinstance(headers, list):
-            return {
-                _stringify_header_part(k).lower(): _stringify_header_part(v)
-                for k, v in headers
-            }
+            return {_stringify_header_part(k).lower(): _stringify_header_part(v) for k, v in headers}
     return {}
 
 
@@ -371,9 +365,7 @@ class Adapter(ChannelAdapter):
                 bot_phone = _twilio_from_or_error()
                 if isinstance(bot_phone, dict):
                     return bot_phone
-                twilio_payload = build_twilio_send_payload(
-                    reply.channel_user_id, bot_phone, reply.text
-                )
+                twilio_payload = build_twilio_send_payload(reply.channel_user_id, bot_phone, reply.text)
                 twilio_result = await mock.send(twilio_payload.model_dump())
                 if USE_PROVIDER_CACHE and "error" not in twilio_result:
                     _remember_provider(reply.channel_user_id, "twilio")
@@ -387,9 +379,7 @@ class Adapter(ChannelAdapter):
             bot_phone = _twilio_from_or_error()
             if isinstance(bot_phone, dict):
                 return bot_phone
-            twilio_payload = build_twilio_send_payload(
-                reply.channel_user_id, bot_phone, reply.text
-            )
+            twilio_payload = build_twilio_send_payload(reply.channel_user_id, bot_phone, reply.text)
             twilio_result = await _send_twilio(twilio_payload)
             if USE_PROVIDER_CACHE and "error" not in twilio_result:
                 _remember_provider(reply.channel_user_id, "twilio")

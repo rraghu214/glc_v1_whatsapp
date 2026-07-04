@@ -129,7 +129,9 @@ def test_verify_twilio_signature_tampered_params():
 def test_verify_twilio_signature_wrong_url():
     """Sig is tied to the exact URL — a different URL must not validate."""
     sig = _make_signature(WEBHOOK_URL, SAMPLE_PAYLOAD, AUTH_TOKEN)
-    assert verify_twilio_signature("https://attacker.example.com/hook", SAMPLE_PAYLOAD, sig, AUTH_TOKEN) is False
+    assert (
+        verify_twilio_signature("https://attacker.example.com/hook", SAMPLE_PAYLOAD, sig, AUTH_TOKEN) is False
+    )
 
 
 def test_verify_twilio_signature_empty_auth_token():
@@ -321,9 +323,7 @@ def test_build_twilio_send_payload_adds_whatsapp_prefix_to_both():
 
 def test_build_twilio_send_payload_does_not_double_prefix():
     """Numbers that already carry 'whatsapp:' prefix must not get it twice."""
-    payload = build_twilio_send_payload(
-        "whatsapp:+14155238886", "whatsapp:+14155551234", "hi"
-    )
+    payload = build_twilio_send_payload("whatsapp:+14155238886", "whatsapp:+14155551234", "hi")
     assert payload.To.count("whatsapp:") == 1
     assert payload.From.count("whatsapp:") == 1
 
@@ -366,9 +366,7 @@ async def test_twilio_inbound_populates_cache_and_send_uses_twilio(monkeypatch):
     signature = RequestValidator(auth_token).compute_signature(url, params)
     raw_body = urlencode(params).encode()
 
-    msg = await adapter.on_message(
-        {"raw_body": raw_body, "headers": {"X-Twilio-Signature": signature}}
-    )
+    msg = await adapter.on_message({"raw_body": raw_body, "headers": {"X-Twilio-Signature": signature}})
     assert msg is not None
     assert msg.metadata["provider"] == "twilio"
     assert provider_cache[OWNER_ID] == "twilio"
@@ -404,9 +402,7 @@ async def test_twilio_inbound_stranger_is_untrusted(monkeypatch):
     raw_body = urlencode(params).encode()
 
     adapter = Adapter(config={"mock": WhatsappMock()})
-    msg = await adapter.on_message(
-        {"raw_body": raw_body, "headers": {"X-Twilio-Signature": signature}}
-    )
+    msg = await adapter.on_message({"raw_body": raw_body, "headers": {"X-Twilio-Signature": signature}})
     # TEMPORARY: stranger passes through in DM mode only because channels.yaml has
     # whatsapp disabled (adapter.py TODO ~line 324). When that TODO is resolved,
     # on_message will return None here — change this to `assert msg is None`.
@@ -434,9 +430,7 @@ async def test_twilio_tampered_signature_is_rejected(monkeypatch):
 
     # Valid signature → accepted (proves the guard is selective, not always-reject)
     valid_sig = _make_signature(url, SAMPLE_PAYLOAD, auth_token)
-    result2 = await adapter.on_message(
-        {"raw_body": raw_body, "headers": {"X-Twilio-Signature": valid_sig}}
-    )
+    result2 = await adapter.on_message({"raw_body": raw_body, "headers": {"X-Twilio-Signature": valid_sig}})
     assert result2 is not None
 
 

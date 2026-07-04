@@ -84,8 +84,10 @@ def _classify_drop_reason(raw_body: bytes, headers: dict[str, str]) -> str:
         except (json.JSONDecodeError, KeyError, IndexError, TypeError):
             return "verified Meta webhook but unexpected payload shape"
         if not value.get("messages"):
-            return ("verified Meta status callback (sent/delivered/read receipt) "
-                    "-- not an inbound message, no action needed")
+            return (
+                "verified Meta status callback (sent/delivered/read receipt) "
+                "-- not an inbound message, no action needed"
+            )
         return "verified Meta webhook but message content unusable (e.g. non-text type)"
 
     return "no recognized signature header -- not from Meta or Twilio"
@@ -128,8 +130,10 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[demo] dropped: {_classify_drop_reason(raw_body, headers)}")
             return
 
-        print(f"[demo] inbound provider={msg.metadata.get('provider')} "
-              f"from={msg.channel_user_id} trust={msg.trust_level} text={msg.text!r}")
+        print(
+            f"[demo] inbound provider={msg.metadata.get('provider')} "
+            f"from={msg.channel_user_id} trust={msg.trust_level} text={msg.text!r}"
+        )
 
         # S11 stub agent: same echo behaviour as the gateway's own
         # /v1/channels/{name} endpoint and Approach 3's channel_webhook()
@@ -151,6 +155,8 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print(f"[demo] Approach 2 (US-13) server listening on port {PORT}")
     print(f"[demo] VERIFY_TOKEN = {VERIFY_TOKEN!r}")
-    print("[demo] gateway is NOT in this path (Approach 3 territory) - "
-          "calls adapter.on_message()/adapter.send() directly")
+    print(
+        "[demo] gateway is NOT in this path (Approach 3 territory) - "
+        "calls adapter.on_message()/adapter.send() directly"
+    )
     HTTPServer(("", PORT), Handler).serve_forever()
