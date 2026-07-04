@@ -304,28 +304,26 @@ class Adapter(ChannelAdapter):
 
         owner_ids = [r.channel_user_id for r in get_pairing_store().owners("whatsapp")]
         trust = classify("whatsapp", parsed.from_id)
-        ok, why = allowed(
+        ok, _why = allowed(
             "whatsapp",
             parsed.from_id,
             owner_ids=owner_ids,
             is_public_channel=is_public,
             was_mentioned=False,
         )
-        if not ok:
-            # channels.yaml ships with whatsapp disabled until a separate
-            # shared-code PR (outside this slot's owned path) flips it, which
-            # makes allowed() reject everyone, including owners. Detect that
-            # specific case by its reason string and fall back to enforcing
-            # only the public+untrusted drop, so the adapter stays usable
-            # before that PR lands. Once the channel is enabled, allowed()
-            # never returns this reason again, so this branch goes dead on
-            # its own and every rejection below correctly falls through to
-            # `return None` — no follow-up change needed either way.
-            if "disabled in channels.yaml" in why:
-                if is_public and trust == "untrusted":
-                    return None
-            else:
-                return None
+        if not ok and is_public:
+            # Only public-channel messages are silently dropped here. A
+            # private (non-public) message always gets an envelope
+            # constructed with its real trust_level, even when allowed()
+            # says no (e.g. channels.yaml has whatsapp disabled, or the
+            # sender isn't in allowed_senders) -- the gateway's own
+            # independent allowed() re-check (glc/routes/channels.py) is
+            # the actual enforcement point for that case, the same
+            # defense-in-depth split every other channel adapter uses.
+            # This also closes the mention-gate for public channels
+            # regardless of trust level (owner_paired/user_paired
+            # included), unlike a trust-based bypass.
+            return None
 
         if USE_PROVIDER_CACHE:
             _remember_provider(parsed.from_id, provider)
