@@ -86,8 +86,6 @@ If prompted to verify, click **"Verify Later"** to skip and continue.
 
 Review the summary screen and click **Create App**.
 
-![Overview create app](assets/screenshots/meta_05_overview_create_app.png)
-
 You will land on the app dashboard.
 
 ### Step 5 — Navigate to the WhatsApp setup
@@ -129,8 +127,6 @@ Copy the value → `WHATSAPP_APP_SECRET`. This is used by the gateway to verify 
 ### Step 9 — Get a 60-day token (optional but recommended)
 
 The 24-hour token from the panel must be regenerated before every session. To avoid this, exchange it for a 60-day token using the Graph API Explorer.
-
-![Graph API Explorer](assets/screenshots/meta_13_graph_api_explorer.png)
 
 1. Open [Graph API Explorer](https://developers.facebook.com/tools/explorer/).
 2. Select your app from the top-right dropdown.
@@ -267,8 +263,6 @@ join <your-sandbox-code>
 ```
 
 The sandbox code is shown on the Twilio sandbox page (e.g. `join silver-tiger`).
-
-![Join sandbox](assets/screenshots/twilio_04_join_sandbox.png)
 
 Twilio will send a confirmation message back to your phone confirming you have joined.
 
